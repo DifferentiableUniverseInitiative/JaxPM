@@ -16,7 +16,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
 <!-- markdownlint-disable -->
 <table>
   <tr>
-    <td align="center"><a href="http://flanusse.net"><img src="https://avatars.githubusercontent.com/u/861591?v=4?s=100" width="100px;" alt=""/><br /><sub><b>Francois Lanusse</b></sub></a><br /><a href="#infra-EiffL" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a> <a href="https://github.com/DifferentiableUniverseInitiative/JaxPM/commits?author=EiffL" title="Tests">⚠️</a> <a href="https://github.com/DifferentiableUniverseInitiative/JaxPM/commits?author=EiffL" title="Code">💻</a></td>
+    <td align="center"><a href="http://flanusse.net"><img src="https://avatars.githubusercontent.com/u/861591?v=4?s=100" width="100px;" alt=""/><br /><sub><b>Francois Lanusse</b></sub></a><br /><a href="#infra-EiffL" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a> <a href="https://github.com/DifferentiableUniverseInitiative/JaxPM/commits?author=EiffL" title="Tests">⚠️</a> <a href="https://github.com/DifferentiableUniverseInitiative/JaxPM/commits?author=EiffL" title="Code">💻</a> <a href="#design-EiffL" title="Design">🎨</a></td>
   </tr>
 </table>
 
