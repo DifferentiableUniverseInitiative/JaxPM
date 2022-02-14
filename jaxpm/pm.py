@@ -1,0 +1,72 @@
+import jax
+import jax.numpy as jnp
+
+import jax_cosmo as jc
+
+from jaxpm.kernels import fftk, gradient_kernel, laplace_kernel, longrange_kernel
+from jaxpm.painting import cic_paint, cic_read
+from jaxpm.growth import growth_factor, growth_rate, dGfa
+
+def pm_forces(positions, mesh_shape=None, delta=None, r_split=0):
+    """
+    Computes gravitational forces on particles using a PM scheme
+    """
+    if mesh_shape is None:
+        mesh_shape = delta.shape
+    kvec = fftk(mesh_shape)
+
+    if delta is None:
+        delta_k = jnp.fft.rfftn(cic_paint(jnp.zeros(mesh_shape), positions))
+    else:
+        delta_k = jnp.fft.rfftn(delta)
+
+    # Computes gravitational potential
+    pot_k = delta_k * laplace_kernel(kvec) * longrange_kernel(kvec, r_split=r_split)
+    # Computes gravitational forces
+    return jnp.stack([cic_read(jnp.fft.irfftn(gradient_kernel(kvec, i)*pot_k), positions) 
+                      for i in range(3)],axis=-1)
+
+
+def lpt(cosmo, initial_conditions, positions, a):
+    """
+    Computes first order LPT displacement
+    """
+    initial_force = pm_forces(positions, delta=initial_conditions)
+    a = jnp.atleast_1d(a)
+    dx = growth_factor(cosmo, a) * initial_force
+    p = a**2 * growth_rate(cosmo, a) * jnp.sqrt(jc.background.Esqr(cosmo, a)) * dx
+    f = a**2 * jnp.sqrt(jc.background.Esqr(cosmo, a)) * dGfa(cosmo, a) * initial_force
+    return dx, p, f
+
+def linear_field(mesh_shape, box_size, pk, seed):
+    """
+    Generate initial conditions.
+    """
+    kvec = fftk(mesh_shape)
+    kmesh = sum((kk / box_size[i] * mesh_shape[i])**2 for i, kk in enumerate(kvec))**0.5
+    pkmesh = pk(kmesh)
+
+    field = jax.random.normal(seed, mesh_shape)
+    field = jnp.fft.rfftn(field) * pkmesh**0.5
+    field = jnp.fft.irfftn(field)
+    return field
+
+def make_ode_fn(mesh_shape):
+    
+    def nbody_ode(state, a, cosmo):
+        """
+        state is a tuple (position, velocities)
+        """
+        pos, vel = state
+
+        forces = pm_forces(pos, mesh_shape=mesh_shape) * 1.5 * cosmo.Omega_m
+
+        # Computes the update of position (drift)
+        dpos = 1. / (a**3 * jnp.sqrt(jc.background.Esqr(cosmo, a))) * vel
+        
+        # Computes the update of velocity (kick)
+        dvel = 1. / (a**2 * jnp.sqrt(jc.background.Esqr(cosmo, a))) * forces
+        
+        return dpos, dvel
+
+    return nbody_ode
