@@ -2,6 +2,8 @@ import jax
 import jax.numpy as jnp
 import jax.lax as lax
 
+from jaxpm.kernels import fftk, cic_compensation
+
 def cic_paint(mesh, positions):
   """ Paints positions onto mesh
   mesh: [nx, ny, nz]
@@ -49,3 +51,18 @@ def cic_read(mesh, positions):
   return (mesh[neighboor_coords[...,0], 
                neighboor_coords[...,1], 
                neighboor_coords[...,3]]*kernel).sum(axis=-1)
+
+def compensate_cic(field):
+  """
+  Compensate for CiC painting
+  Args:
+    field: input 3D cic-painted field
+  Returns:
+    compensated_field
+  """
+  nc = field.shape
+  kvec = fftk(nc)
+
+  delta_k = jnp.fft.rfftn(field)
+  delta_k = cic_compensation(kvec) * delta_k
+  return jnp.fft.irfftn(delta_k)
