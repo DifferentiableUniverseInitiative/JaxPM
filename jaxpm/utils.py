@@ -92,7 +92,7 @@ def gaussian_smoothing(im, sigma):
                  axis=-1)
   k = jnp.linalg.norm(kvec, axis=-1)
   # We compute the value of the filter at frequency k
-  filter = norm(0, 1. / (2. * np.pi * sigma)).pdf(k)
+  filter = norm.pdf(k, 0, 1. / (2. * np.pi * sigma))
   filter /= filter[0,0]
 
   return jnp.fft.ifft2(jnp.fft.fft2(im) * filter).real
