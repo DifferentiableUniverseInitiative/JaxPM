@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 import jax_cosmo as jc
 
-from jaxpm.kernels import fftk, gradient_kernel, laplace_kernel, longrange_kernel
+from jaxpm.kernels import fftk, gradient_kernel, laplace_kernel, longrange_kernel, PGD_kernel
 from jaxpm.painting import cic_paint, cic_read
 from jaxpm.growth import growth_factor, growth_rate, dGfa
 
@@ -70,3 +70,25 @@ def make_ode_fn(mesh_shape):
         return dpos, dvel
 
     return nbody_ode
+
+
+def pgd_correction(pos, cosmo, params):
+    """
+    improve the short-range interactions of PM-Nbody simulations with potential gradient descent method
+    """
+    kvec = fftk(mesh_shape)
+
+    delta = cic_paint(jnp.zeros(mesh_shape), pos)
+    alpha, kl, ks = params
+    delta_k = jnp.fft.rfftn(delta)
+    PGD_range=PGD_kernel(kvec, kl, ks)
+    
+    pot_k_pgd=(delta_k * laplace_kernel(kvec))*PGD_range
+
+    forces_pgd= jnp.stack([cic_read(jnp.fft.irfftn(gradient_kernel(kvec, i)*pot_k_pgd), pos) 
+                      for i in range(3)],axis=-1)
+    forces_pgd = forces_pgd * 1.5 * cosmo.Omega_m
+    
+    dpos_pgd = forces_pgd*alpha
+   
+    return dpos_pgd
