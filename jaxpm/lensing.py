@@ -26,11 +26,9 @@ def density_plane(positions,
     xy = xy / nx * plane_resolution
 
     # Selecting only particles that fall inside the volume of interest
-    mask = (d > (center - width / 2)) & (d <= (center + width / 2))
-    xy = xy[mask]
-
+    weight = jnp.where((d > (center - width / 2)) & (d <= (center + width / 2)), 1., 0.)
     # Painting density plane
-    density_plane = cic_paint_2d(jnp.zeros([plane_resolution, plane_resolution]), xy)
+    density_plane = cic_paint_2d(jnp.zeros([plane_resolution, plane_resolution]), xy, weight)
 
     # Apply density normalization
     density_plane = density_plane / ((nx / plane_resolution) *
