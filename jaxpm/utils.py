@@ -1,6 +1,6 @@
 import numpy as np
 import jax.numpy as jnp
-from scipy.stats import norm
+from jax.scipy.stats import norm
 
 __all__ = ['power_spectrum']
 
