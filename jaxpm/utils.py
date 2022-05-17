@@ -1,5 +1,6 @@
 import numpy as np
 import jax.numpy as jnp
+from scipy.stats import norm
 
 __all__ = ['power_spectrum']
 
@@ -79,3 +80,19 @@ def power_spectrum(field, kmin=5, dk=0.5, boxsize=False):
   kbins = kedges[:-1] + (kedges[1:] - kedges[:-1]) / 2
 
   return kbins, P / norm
+
+def gaussian_smoothing(im, sigma):
+  """
+  im: 2d image
+  sigma: smoothing scale in px 
+  """
+  # Compute k vector
+  kvec = jnp.stack(jnp.meshgrid(jnp.fft.fftfreq(im.shape[0]),
+                                jnp.fft.fftfreq(im.shape[1])),
+                 axis=-1)
+  k = jnp.linalg.norm(kvec, axis=-1)
+  # We compute the value of the filter at frequency k
+  filter = norm(0, 1. / (2. * np.pi * sigma)).pdf(k)
+
+  return jnp.fft.ifft2(jnp.fft.fft2(im) * filter).real
+
