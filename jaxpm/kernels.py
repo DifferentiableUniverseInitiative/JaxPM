@@ -98,3 +98,29 @@ def cic_compensation(kvec):
   kwts = [np.sinc(kvec[i] / (2 * np.pi)) for i in range(3)]
   wts = (kwts[0] * kwts[1] * kwts[2])**(-2)
   return wts
+
+def PGD_kernel(kvec, kl, ks):
+  """
+  Computes the PGD kernel
+  Parameters:
+  -----------
+  kvec: array
+    Array of k values in Fourier space
+  kl: float
+    initial long range scale parameter
+  ks: float
+    initial dhort range scale parameter
+  Returns:
+  --------
+  v: array
+    kernel
+  """
+  kk = sum(ki**2 for ki in kvec)
+  kl2 = kl**2
+  ks4 = ks**4
+  mask = (kk == 0).nonzero()
+  kk[mask] = 1
+  v = jnp.exp(-kl2 / kk) * jnp.exp(-kk**2 / ks4)
+  imask = (~(kk == 0)).astype(int)
+  v *= imask
+  return v
