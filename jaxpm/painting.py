@@ -1,4 +1,3 @@
-from tkinter import W
 import jax
 import jax.numpy as jnp
 import jax.lax as lax
