@@ -87,7 +87,6 @@ def pgd_correction(pos, cosmo, params):
 
     forces_pgd= jnp.stack([cic_read(jnp.fft.irfftn(gradient_kernel(kvec, i)*pot_k_pgd), pos) 
                       for i in range(3)],axis=-1)
-    forces_pgd = forces_pgd * 1.5 * cosmo.Omega_m
     
     dpos_pgd = forces_pgd*alpha
    
