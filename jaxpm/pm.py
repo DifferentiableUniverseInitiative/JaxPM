@@ -80,7 +80,6 @@ def pgd_correction(pos, mesh_shape, cosmo, params):
       params: [alpha, kl, ks] pgd parameters
     """
     kvec = fftk(mesh_shape)
-
     delta = cic_paint(jnp.zeros(mesh_shape), pos)
     alpha, kl, ks = params
     delta_k = jnp.fft.rfftn(delta)

@@ -81,6 +81,55 @@ def power_spectrum(field, kmin=5, dk=0.5, boxsize=False):
 
   return kbins, P / norm
 
+def cross_correlation_coefficients(field_a,field_b, kmin=5, dk=0.5, boxsize=False):
+  """
+    Calculate the cross correlation coefficients given two real space field
+    
+    Args:
+        
+        field_a: real valued field 
+        field_b: real valued field 
+        kmin: minimum k-value for binned powerspectra
+        dk: differential in each kbin
+        boxsize: length of each boxlength (can be strangly shaped?)
+    
+    Returns:
+        
+        kbins: the central value of the bins for plotting
+        P / norm: normalized cross correlation coefficient between two field a and b 
+        
+  """
+  shape = field_a.shape
+  nx, ny, nz = shape
+
+  #initialze values related to powerspectra (mode bins and weights)
+  dig, Nsum, xsum, W, k, kedges = _initialize_pk(shape, boxsize, kmin, dk)
+
+  #fast fourier transform
+  fft_image_a = jnp.fft.fftn(field_a)
+  fft_image_b = jnp.fft.fftn(field_b)
+
+  #absolute value of fast fourier transform
+  pk = fft_image_a * jnp.conj(fft_image_b)
+
+  #calculating powerspectra
+  real = jnp.real(pk).reshape([-1])
+  imag = jnp.imag(pk).reshape([-1])
+
+  Psum = jnp.bincount(dig, weights=(W.flatten() * imag), length=xsum.size) * 1j
+  Psum += jnp.bincount(dig, weights=(W.flatten() * real), length=xsum.size)
+
+  P = ((Psum / Nsum)[1:-1] * boxsize.prod()).astype('float32')
+
+  #normalization for powerspectra
+  norm = np.prod(np.array(shape[:])).astype('float32')**2
+
+  #find central values of each bin
+  kbins = kedges[:-1] + (kedges[1:] - kedges[:-1]) / 2
+
+  return kbins, P / norm
+
+
 def gaussian_smoothing(im, sigma):
   """
   im: 2d image
