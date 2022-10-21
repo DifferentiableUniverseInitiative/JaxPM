@@ -64,7 +64,6 @@ def lpt(cosmo, initial_conditions, positions, a):
     Computes first order LPT displacement
     """
     initial_force = pm_forces(positions, delta_k=initial_conditions)
-    print(initial_force.shape)
     a = jnp.atleast_1d(a)
     dx = dops.scalar_multiply(initial_force, growth_factor(cosmo, a))
     p = dops.scalar_multiply(dx, a**2 * growth_rate(cosmo, a) *
