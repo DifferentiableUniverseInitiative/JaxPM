@@ -16,7 +16,7 @@ def pm_forces(positions, mesh_shape=None, delta_k=None, halo_size=16):
     """
     if mesh_shape is None:
         mesh_shape = delta_k.shape
-    kvec = [k.squeeze() for k in fftk(mesh_shape)]
+    kvec = [k.squeeze() for k in fftk(mesh_shape, symmetric=False)]
 
     if delta_k is None:
         delta = dops.cic_paint(positions, mesh_shape, halo_size)
@@ -38,7 +38,7 @@ def linear_field(cosmo, mesh_shape, box_size, seed, return_Fourier=True):
     """
 
     # Sample normal field
-    field = dops.normal(seed, mesh_shape)
+    field = dops.normal(seed, shape=mesh_shape)
 
     # Go to Fourier space
     field = dops.fft3d(dops.reshape_split_to_dense(field))
@@ -64,8 +64,9 @@ def lpt(cosmo, initial_conditions, positions, a):
     Computes first order LPT displacement
     """
     initial_force = pm_forces(positions, delta_k=initial_conditions)
+    print(initial_force.shape)
     a = jnp.atleast_1d(a)
-    dx = dops.scalar_multiply(initial_force * growth_factor(cosmo, a))
+    dx = dops.scalar_multiply(initial_force, growth_factor(cosmo, a))
     p = dops.scalar_multiply(dx, a**2 * growth_rate(cosmo, a) *
                              jnp.sqrt(jc.background.Esqr(cosmo, a)))
     return dx, p
