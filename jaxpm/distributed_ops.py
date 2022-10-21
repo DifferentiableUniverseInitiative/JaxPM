@@ -147,24 +147,24 @@ def cic_paint(pos, mesh_shape, halo_size=0):
 
         # Perform halo exchange
         # Halo exchange along x
-        left = lax.pshuffle(mesh[-halo_size:],
+        left = lax.pshuffle(mesh[-2*halo_size:],
                             perm=range(mesh_size['nx'])[::-1],
                             axis_name='x')
-        right = lax.pshuffle(mesh[:halo_size],
+        right = lax.pshuffle(mesh[:2*halo_size],
                              perm=range(mesh_size['nx'])[::-1],
                              axis_name='x')
-        mesh = mesh.at[:halo_size].add(left)
-        mesh = mesh.at[-halo_size:].add(right)
+        mesh = mesh.at[:2*halo_size].add(left)
+        mesh = mesh.at[-2*halo_size:].add(right)
 
         # Halo exchange along y
-        left = lax.pshuffle(mesh[:, -halo_size:],
+        left = lax.pshuffle(mesh[:, -2*halo_size:],
                             perm=range(mesh_size['ny'])[::-1],
                             axis_name='y')
-        right = lax.pshuffle(mesh[:, :halo_size],
+        right = lax.pshuffle(mesh[:, :2*halo_size],
                              perm=range(mesh_size['ny'])[::-1],
                              axis_name='y')
-        mesh = mesh.at[:, :halo_size].add(left)
-        mesh = mesh.at[:, -halo_size:].add(right)
+        mesh = mesh.at[:, :2*halo_size].add(left)
+        mesh = mesh.at[:, -2*halo_size:].add(right)
 
         # removing halo and returning mesh
         return mesh[halo_size:-halo_size, halo_size:-halo_size]
