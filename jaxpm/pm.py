@@ -3,40 +3,51 @@ import jax.numpy as jnp
 
 import jax_cosmo as jc
 
-from jaxpm.kernels import fftk, gradient_kernel, laplace_kernel, longrange_kernel, PGD_kernel
+from jaxpm.ops import fft3d, ifft3d, zeros
+from jaxpm.kernels import fftk, apply_gradient_laplace
 from jaxpm.painting import cic_paint, cic_read
 from jaxpm.growth import growth_factor, growth_rate, dGfa
 
-def pm_forces(positions, mesh_shape=None, delta=None, r_split=0):
+def pm_forces(positions, mesh_shape=None, delta_k=None, halo_size=0, token=None, comms=None):
     """
     Computes gravitational forces on particles using a PM scheme
     """
     if mesh_shape is None:
-        mesh_shape = delta.shape
-    kvec = fftk(mesh_shape)
+        mesh_shape = delta_k.shape
 
-    if delta is None:
-        delta_k = jnp.fft.rfftn(cic_paint(jnp.zeros(mesh_shape), positions))
-    else:
-        delta_k = jnp.fft.rfftn(delta)
+    kvec = fftk(mesh_shape, comms=comms)
+
+    if delta_k is None:
+        delta, token = cic_paint(zeros(mesh_shape,comms=comms), 
+                                positions, 
+                                halo_size=halo_size, token=token, comms=comms)
+        delta_k, token = fft3d(delta, token=token, comms=comms)
 
     # Computes gravitational potential
-    pot_k = delta_k * laplace_kernel(kvec) * longrange_kernel(kvec, r_split=r_split)
+    forces_k = apply_gradient_laplace(kfield, kvec)
+
     # Computes gravitational forces
-    return jnp.stack([cic_read(jnp.fft.irfftn(gradient_kernel(kvec, i)*pot_k), positions) 
-                      for i in range(3)],axis=-1)
+    fx, token = ifft3d(forces_k[...,0], token=token, comms=comms)
+    fx, token = cic_read(fx, positions, halo_size=halo_size, comms=comms)
 
+    fy, token = ifft3d(forces_k[...,1], token=token, comms=comms)
+    fy, token = cic_read(fy, positions, halo_size=halo_size, comms=comms)
 
-def lpt(cosmo, initial_conditions, positions, a):
+    fz, token = ifft3d(forces_k[...,2], token=token, comms=comms)
+    fz, token = cic_read(fz, positions, halo_size=halo_size, comms=comms)
+
+    return jnp.stack([fx,fy,fz],axis=-1), token
+
+def lpt(cosmo, initial_conditions, positions, a, token=token, comms=comms):
     """
     Computes first order LPT displacement
     """
-    initial_force = pm_forces(positions, delta=initial_conditions)
+    initial_force = pm_forces(positions, delta=initial_conditions, token=token, comms=comms)
     a = jnp.atleast_1d(a)
     dx = growth_factor(cosmo, a) * initial_force
     p = a**2 * growth_rate(cosmo, a) * jnp.sqrt(jc.background.Esqr(cosmo, a)) * dx
     f = a**2 * jnp.sqrt(jc.background.Esqr(cosmo, a)) * dGfa(cosmo, a) * initial_force
-    return dx, p, f
+    return dx, p, f, comms
 
 def linear_field(mesh_shape, box_size, pk, seed):
     """
