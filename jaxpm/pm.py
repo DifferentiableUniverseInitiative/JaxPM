@@ -10,32 +10,32 @@ from jaxpm.painting import cic_paint, cic_read
 from jaxpm.growth import growth_factor, growth_rate, dGfa
 
 
-def pm_forces(positions, mesh_shape=None, delta_k=None, halo_size=0, token=None, comms=None):
+def pm_forces(positions, mesh_shape=None, delta_k=None, halo_size=0, sharding_info=None):
     """
     Computes gravitational forces on particles using a PM scheme
     """
     if delta_k is None:
-        delta = cic_paint(zeros(mesh_shape, comms=comms),
+        delta = cic_paint(zeros(mesh_shape, sharding_info=sharding_info),
                           positions,
-                          halo_size=halo_size, comms=comms)
-        delta_k = fft3d(delta, comms=comms)
+                          halo_size=halo_size, sharding_info=sharding_info)
+        delta_k = fft3d(delta, sharding_info=sharding_info)
 
     # Computes gravitational forces
-    kvec = fftk(delta_k.shape, symmetric=False, comms=comms)
+    kvec = fftk(delta_k.shape, symmetric=False, sharding_info=sharding_info)
     forces_k = apply_gradient_laplace(delta_k, kvec)
 
     # Interpolate forces at the position of particles
-    return jnp.stack([cic_read(ifft3d(forces_k[..., i], comms=comms).real,
-                               positions, halo_size=halo_size, comms=comms)
+    return jnp.stack([cic_read(ifft3d(forces_k[..., i], sharding_info=sharding_info).real,
+                               positions, halo_size=halo_size, sharding_info=sharding_info)
                       for i in range(3)], axis=-1)
 
 
-def lpt(cosmo, positions, initial_conditions, a, halo_size=0, comms=None):
+def lpt(cosmo, positions, initial_conditions, a, halo_size=0, sharding_info=None):
     """
     Computes first order LPT displacement
     """
     initial_force = pm_forces(
-        positions, delta_k=initial_conditions, halo_size=halo_size, comms=comms)
+        positions, delta_k=initial_conditions, halo_size=halo_size, sharding_info=sharding_info)
     a = jnp.atleast_1d(a)
     dx = growth_factor(cosmo, a) * initial_force
     p = a**2 * growth_rate(cosmo, a) * \
@@ -45,21 +45,21 @@ def lpt(cosmo, positions, initial_conditions, a, halo_size=0, comms=None):
     return dx, p, f
 
 
-def linear_field(cosmo, mesh_shape, box_size, key, comms=None):
+def linear_field(cosmo, mesh_shape, box_size, key, sharding_info=None):
     """
     Generate initial conditions in Fourier space.
     """
     # Sample normal field
-    field = normal(key, mesh_shape, comms=comms)
+    field = normal(key, mesh_shape, sharding_info=sharding_info)
 
     # Transform to Fourier space
-    kfield = fft3d(field, comms=comms)
+    kfield = fft3d(field, sharding_info=sharding_info)
 
     # Rescaling k to physical units
     kvec = [k / box_size[i] * mesh_shape[i]
             for i, k in enumerate(fftk(kfield.shape,
                                        symmetric=False,
-                                       comms=comms))]
+                                       sharding_info=sharding_info))]
 
     # Evaluating linear matter powerspectrum
     k = jnp.logspace(-4, 2, 256)
@@ -77,7 +77,7 @@ def linear_field(cosmo, mesh_shape, box_size, key, comms=None):
     return kfield
 
 
-def make_ode_fn(mesh_shape, halo_size=0, comms=None):
+def make_ode_fn(mesh_shape, halo_size=0, sharding_info=None):
 
     def nbody_ode(state, a, cosmo):
         """
@@ -86,7 +86,7 @@ def make_ode_fn(mesh_shape, halo_size=0, comms=None):
         pos, vel = state
 
         forces = pm_forces(pos, mesh_shape=mesh_shape,
-                           halo_size=halo_size, comms=comms) * 1.5 * cosmo.Omega_m
+                           halo_size=halo_size, sharding_info=sharding_info) * 1.5 * cosmo.Omega_m
 
         # Computes the update of position (drift)
         dpos = 1. / (a**3 * jnp.sqrt(jc.background.Esqr(cosmo, a))) * vel
