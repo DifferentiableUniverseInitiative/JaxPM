@@ -50,9 +50,8 @@ def pm_forces(mesh , positions, mesh_shape=None, delta_k=None, halo_size=0, shar
 
         force = cic_read(mesh , ifft_forces, positions, halo_size=halo_size, sharding_info=sharding_info)
         forces.append(force)
-        print(f"Shape {ifft_forces.shape}")
 
-    return jnp.stack(forces)
+    return jnp.stack(forces , axis=-1)
 
 
 
@@ -64,7 +63,6 @@ def lpt(mesh ,cosmo, positions, initial_conditions, a, halo_size=0, sharding_inf
         positions, delta_k=initial_conditions, halo_size=halo_size, sharding_info=sharding_info)
     a = jnp.atleast_1d(a)
 
-    print(f"Shape initial {initial_conditions.shape}")
 
     @jax.jit
     def compute_dx(cosmo , i_force):
@@ -84,6 +82,8 @@ def lpt(mesh ,cosmo, positions, initial_conditions, a, halo_size=0, sharding_inf
         dx = compute_dx(cosmo , initial_force)
         p  = compute_p(cosmo , dx)
         f = compute_f(cosmo , initial_force)
+
+
 
     return dx, p, f
 
