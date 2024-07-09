@@ -69,3 +69,4 @@ def compensate_cic(field):
     delta_k = jaxpm.ops.fftn(field)
     delta_k = cic_compensation(kvec) * delta_k
     return jaxpm.ops.ifftn(delta_k).real
+
