@@ -4,22 +4,28 @@ import jax.numpy as jnp
 
 import jaxpm
 import jaxpm.ops
-from jaxpm.kernels import cic_compensation, fftk
+from jaxpm._src.spmd_config import pm_operators
+from jaxpm.kernels import cic_compensation
 
 
 def cic_paint(particle_mesh, positions, halo_size=0):
-    return jaxpm.ops.cic_paint(particle_mesh, positions, halo_size=halo_size)
+    return pm_operators.cic_paint(particle_mesh,
+                                  positions,
+                                  halo_size=halo_size)
 
 
 def cic_read(mesh, positions, halo_size=0):
-    return jaxpm.ops.cic_read(mesh, positions, halo_size=halo_size)
+    return pm_operators.cic_read(mesh, positions, halo_size=halo_size)
 
 
 def cic_paint_dx(displacements, halo_size=0):
-    return jaxpm.ops.cic_paint_dx(displacements, halo_size=halo_size)
+    return pm_operators.cic_paint_dx(displacements, halo_size=halo_size)
 
 
-# TO REDO
+def cic_read_dx(particle_mesh, halo_size=0):
+    return pm_operators.cic_read_dx(particle_mesh, halo_size=halo_size)
+
+
 def cic_paint_2d(mesh, positions, weight):
     """ Paints positions onto a 2d mesh
     mesh: [nx, ny]
