@@ -1,15 +1,16 @@
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import jax_cosmo as jc
 from jax.sharding import PartitionSpec as P
 
+from jaxpm.distributed import autoshmap, fft3d, get_local_shape, ifft3d
 from jaxpm.growth import dGfa, growth_factor, growth_rate
 from jaxpm.kernels import (PGD_kernel, fftk, gradient_kernel, laplace_kernel,
                            longrange_kernel)
 from jaxpm.painting import cic_paint, cic_read
-from jaxpm.distributed import fft3d, ifft3d, autoshmap, get_local_shape
 
-from functools import partial
 
 def pm_forces(positions, mesh_shape=None, delta=None, r_split=0):
     """
@@ -100,28 +101,28 @@ def make_ode_fn(mesh_shape):
     return nbody_ode
 
 
-def pgd_correction(pos, params):		
-    """		
-    improve the short-range interactions of PM-Nbody simulations with potential gradient descent method, based on https://arxiv.org/abs/1804.00671		
-    args:		
-      pos: particle positions [npart, 3]		
-      params: [alpha, kl, ks] pgd parameters		
-    """		
-    kvec = fftk(mesh_shape)		
+def pgd_correction(pos, params):
+    """
+    improve the short-range interactions of PM-Nbody simulations with potential gradient descent method, based on https://arxiv.org/abs/1804.00671
+    args:
+      pos: particle positions [npart, 3]
+      params: [alpha, kl, ks] pgd parameters
+    """
+    kvec = fftk(mesh_shape)
 
-    delta = cic_paint(jnp.zeros(mesh_shape), pos)		
-    alpha, kl, ks = params		
-    delta_k = jnp.fft.rfftn(delta)		
-    PGD_range = PGD_kernel(kvec, kl, ks)		
+    delta = cic_paint(jnp.zeros(mesh_shape), pos)
+    alpha, kl, ks = params
+    delta_k = jnp.fft.rfftn(delta)
+    PGD_range = PGD_kernel(kvec, kl, ks)
 
-    pot_k_pgd = (delta_k * laplace_kernel(kvec)) * PGD_range		
+    pot_k_pgd = (delta_k * laplace_kernel(kvec)) * PGD_range
 
-    forces_pgd = jnp.stack([		
-        cic_read(jnp.fft.irfftn(gradient_kernel(kvec, i) * pot_k_pgd), pos)		
-        for i in range(3)		
-    ],		
-                           axis=-1)		
+    forces_pgd = jnp.stack([
+        cic_read(jnp.fft.irfftn(gradient_kernel(kvec, i) * pot_k_pgd), pos)
+        for i in range(3)
+    ],
+                           axis=-1)
 
-    dpos_pgd = forces_pgd * alpha		
+    dpos_pgd = forces_pgd * alpha
 
     return dpos_pgd
