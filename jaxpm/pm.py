@@ -98,3 +98,30 @@ def make_ode_fn(mesh_shape):
         return dpos, dvel
 
     return nbody_ode
+
+
+def pgd_correction(pos, params):		
+    """		
+    improve the short-range interactions of PM-Nbody simulations with potential gradient descent method, based on https://arxiv.org/abs/1804.00671		
+    args:		
+      pos: particle positions [npart, 3]		
+      params: [alpha, kl, ks] pgd parameters		
+    """		
+    kvec = fftk(mesh_shape)		
+
+    delta = cic_paint(jnp.zeros(mesh_shape), pos)		
+    alpha, kl, ks = params		
+    delta_k = jnp.fft.rfftn(delta)		
+    PGD_range = PGD_kernel(kvec, kl, ks)		
+
+    pot_k_pgd = (delta_k * laplace_kernel(kvec)) * PGD_range		
+
+    forces_pgd = jnp.stack([		
+        cic_read(jnp.fft.irfftn(gradient_kernel(kvec, i) * pot_k_pgd), pos)		
+        for i in range(3)		
+    ],		
+                           axis=-1)		
+
+    dpos_pgd = forces_pgd * alpha		
+
+    return dpos_pgd
