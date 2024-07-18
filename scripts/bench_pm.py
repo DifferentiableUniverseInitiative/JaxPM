@@ -15,8 +15,8 @@ import jax.numpy as jnp
 import jax_cosmo as jc
 import numpy as np
 from cupy.cuda.nvtx import RangePop, RangePush
-from diffrax import (Dopri5, LeapfrogMidpoint, ODETerm, PIDController, SaveAt,
-                     diffeqsolve)
+from diffrax import (ConstantStepSize, Dopri5, LeapfrogMidpoint, ODETerm,
+                     PIDController, SaveAt, Tsit5, diffeqsolve)
 from jax.experimental import mesh_utils
 from jax.experimental.multihost_utils import sync_global_devices
 from jax.sharding import Mesh, NamedSharding
@@ -29,7 +29,8 @@ from jaxpm.pm import linear_field, lpt, make_ode_fn
 
 def chrono_fun(fun, *args):
     start = time.perf_counter()
-    out = fun(*args).block_until_ready()
+    out = fun(*args)
+    out[0].block_until_ready()
     end = time.perf_counter()
     return out, end - start
 
@@ -59,18 +60,22 @@ def run_simulation(mesh_shape,
         cosmo = jc.Planck15(Omega_c=omega_c, sigma8=sigma8)
         dx, p, _ = lpt(cosmo, initial_conditions, 0.1, halo_size=halo_size)
 
-        # Evolve the simulation forward
-        ode_fn = make_ode_fn(mesh_shape, halo_size=halo_size)
-        term = ODETerm(
-            lambda t, state, args: jnp.stack(ode_fn(state, t, args), axis=0))
-
         if solver_choice == "Dopri5":
             solver = Dopri5()
         elif solver_choice == "LeapfrogMidpoint":
             solver = LeapfrogMidpoint()
+        elif solver_choice == "Tsit5":
+            solver = Tsit5()
+        elif solver_choice == "lpt":
+            lpt_field = cic_paint_dx(dx, halo_size=halo_size)
+            return lpt_field, {"num_steps": 0, "Solver": "LPT"}
         else:
             raise ValueError(
                 "Invalid solver choice. Use 'Dopri5' or 'LeapfrogMidpoint'.")
+        # Evolve the simulation forward
+        ode_fn = make_ode_fn(mesh_shape, halo_size=halo_size)
+        term = ODETerm(
+            lambda t, state, args: jnp.stack(ode_fn(state, t, args), axis=0))
 
         stepsize_controller = PIDController(rtol=1e-4, atol=1e-4)
         res = diffeqsolve(term,
@@ -93,17 +98,17 @@ def run_simulation(mesh_shape,
         # Warm start
         times = []
         RangePush("warmup")
-        final_field, stats, warmup_time = chrono_fun(simulate, 0.32, 0.8)
+        (final_field, stats), warmup_time = chrono_fun(simulate, 0.32, 0.8)
         RangePop()
         sync_global_devices("warmup")
         for i in range(iterations):
             RangePush(f"sim iter {i}")
-            final_field, stats, sim_time = chrono_fun(simulate, 0.32, 0.8)
+            (final_field, stats), sim_time = chrono_fun(simulate, 0.32, 0.8)
             RangePop()
             times.append(sim_time)
         return stats, warmup_time, times, final_field
 
-    if jax.device_count() > 1 and pdims:
+    if jax.device_count() > 1:
         devices = mesh_utils.create_device_mesh(pdims)
         mesh = Mesh(devices.T, axis_names=('x', 'y'))
         with mesh:
@@ -134,7 +139,7 @@ if __name__ == "__main__":
                         type=str,
                         help='Processor dimensions',
                         default=None)
-    parser.add_argument('-h',
+    parser.add_argument('-hs',
                         '--halo_size',
                         type=int,
                         help='Halo size',
@@ -143,7 +148,11 @@ if __name__ == "__main__":
                         '--solver',
                         type=str,
                         help='Solver',
-                        choices=["Dopri5", "LeapfrogMidpoint"],
+                        choices=[
+                            "Dopri5", "dopri5", "d5", "Tsit5", "tsit5", "t5",
+                            "LeapfrogMidpoint", "leapfrogmidpoint", "lfm",
+                            "lpt"
+                        ],
                         required=True)
     parser.add_argument('-i',
                         '--iterations',
@@ -170,10 +179,24 @@ if __name__ == "__main__":
     output_path = args.output_path
     os.makedirs(output_path, exist_ok=True)
 
+    match solver_choice:
+        case "Dopri5", "dopri5", "d5":
+            solver_choice = "Dopri5"
+        case "Tsit5", "tsit5", "t5":
+            solver_choice = "Tsit5"
+        case "LeapfrogMidpoint", "leapfrogmidpoint", "lfm":
+            solver_choice = "LeapfrogMidpoint"
+        case "lpt":
+            solver_choice = "lpt"
+        case _:
+            raise ValueError(
+                "Invalid solver choice. Use 'Dopri5', 'Tsit5', 'LeapfrogMidpoint' or 'lpt"
+            )
+
     if args.pdims:
         pdims = tuple(map(int, args.pdims.split("x")))
     else:
-        pdims = None
+        pdims = (1, 1)
 
     mesh_shape = [mesh_size] * 3
 
@@ -184,14 +207,6 @@ if __name__ == "__main__":
                                                             iterations,
                                                             pdims=pdims)
 
-    # Save the final field
-    if args.save_fields:
-        nb_gpus = jax.device_count()
-        field_folder = f"{output_path}/final_field/{nb_gpus}/{mesh_size}_{box_size[0]}/{solver_choice}/{halo_size}"
-        os.makedirs(field_folder, exist_ok=True)
-        np.save(f'{field_folder}/final_field_{rank}.npy',
-                final_field.addressable_data(0))
-
     # Write benchmark results to CSV
     # RANK SIZE MESHSIZE BOX HALO SOLVER NUM_STEPS JITTIME MIN MAX MEAN STD
     times = np.array(times)
@@ -200,11 +215,31 @@ if __name__ == "__main__":
     max_time = np.max(times) * 1000
     mean_time = np.mean(times) * 1000
     std_time = np.std(times) * 1000
+
     with open(f"{output_path}/jax_pm_benchmark.csv", 'a') as f:
         f.write(
-            f"{rank},{size},{mesh_size},{box_size[0]},{halo_size},{solver_choice},{iterations},{jit_in_ms},{min_time},{max_time},{mean_time},{std_time}\n"
+            f"{rank},{size},{mesh_size},{box_size[0]},{halo_size},{solver_choice},{stats['num_steps']},{jit_in_ms},{min_time},{max_time},{mean_time},{std_time}\n"
         )
+
+    # Save the final field
+    nb_gpus = jax.device_count()
+    pdm_str = f"{pdims[0]}x{pdims[1]}"
+    field_folder = f"{output_path}/final_field/{nb_gpus}/{mesh_size}_{int(box_size[0])}/{pdm_str}/{solver_choice}/{halo_size}"
+    os.makedirs(field_folder, exist_ok=True)
+    with open(f'{field_folder}/jaxpm.log', 'w') as f:
+        f.write(f"Args: {args}\n")
+        f.write(f"JIT time: {jit_in_ms:.4f} ms\n")
+        f.write(f"Min time: {min_time:.4f} ms\n")
+        f.write(f"Max time: {max_time:.4f} ms\n")
+        f.write(f"Mean time: {mean_time:.4f} ms\n")
+        f.write(f"Std time: {std_time:.4f} ms\n")
+        f.write(f"Stats: {stats}\n")
+    if args.save_fields:
+        np.save(f'{field_folder}/final_field_0_{rank}.npy',
+                final_field.addressable_data(0))
 
     print(f"Finished! Warmup time: {warmup_time:.4f} seconds")
     print(f"mean times: {np.mean(times):.4f}")
-    print(f"Stats")
+    print(f"Stats {stats}")
+    print(f"Saving to {output_path}/jax_pm_benchmark.csv")
+    print(f"Saving field and logs in {field_folder}")
