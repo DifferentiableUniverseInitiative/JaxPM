@@ -131,7 +131,6 @@ def get_local_shape(mesh_shape):
         return [
             mesh_shape[0] // pdims[0], mesh_shape[1] // pdims[1], mesh_shape[2]
         ]
-    
 
 
 def normal_field(mesh_shape, seed=None):

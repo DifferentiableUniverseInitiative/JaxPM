@@ -38,6 +38,7 @@ def pm_forces(positions, mesh_shape=None, delta=None, r_split=0, halo_size=0):
 
     return forces
 
+
 def lpt(cosmo, initial_conditions, a, halo_size=0):
     """
     Computes first order LPT displacement
