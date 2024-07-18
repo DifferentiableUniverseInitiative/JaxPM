@@ -9,10 +9,10 @@ from jaxpm.distributed import autoshmap, fft3d, get_local_shape, ifft3d
 from jaxpm.growth import dGfa, growth_factor, growth_rate
 from jaxpm.kernels import (PGD_kernel, fftk, gradient_kernel, laplace_kernel,
                            longrange_kernel)
-from jaxpm.painting import cic_paint, cic_read
+from jaxpm.painting import cic_paint, cic_paint_dx, cic_read, cic_read_dx
 
 
-def pm_forces(positions, mesh_shape=None, delta=None, r_split=0):
+def pm_forces(positions, mesh_shape=None, delta=None, r_split=0, halo_size=0):
     """
     Computes gravitational forces on particles using a PM scheme
     """
@@ -21,7 +21,7 @@ def pm_forces(positions, mesh_shape=None, delta=None, r_split=0):
     kvec = fftk(mesh_shape)
 
     if delta is None:
-        delta_k = fft3d(cic_paint(jnp.zeros(mesh_shape), positions))
+        delta_k = fft3d(cic_paint_dx(positions, halo_size=0))
     else:
         delta_k = fft3d(delta)
 
@@ -29,26 +29,28 @@ def pm_forces(positions, mesh_shape=None, delta=None, r_split=0):
     pot_k = delta_k * laplace_kernel(kvec) * longrange_kernel(kvec,
                                                               r_split=r_split)
     # Computes gravitational forces
-    return jnp.stack([
-        cic_read(ifft3d(gradient_kernel(kvec, i) * pot_k), positions)
+    forces = jnp.stack([
+        cic_read_dx(ifft3d(gradient_kernel(kvec, i) * pot_k), halo_size=0)
         for i in range(3)
     ],
-                     axis=-1)
+                       axis=-1)
 
+    return forces
 
-def lpt(cosmo, initial_conditions, a, particles_shape=None):
+def lpt(cosmo, initial_conditions, a, halo_size=0):
     """
     Computes first order LPT displacement
     """
-    if particles_shape is None:
-        particles_shape = initial_conditions.shape
-    local_mesh_shape = get_local_shape(particles_shape)
+    local_mesh_shape = get_local_shape(initial_conditions.shape) + (3, )
     displacement = autoshmap(
-      partial(jnp.zeros, shape=local_mesh_shape+[3], dtype='float32'),
+      partial(jnp.zeros, shape=(local_mesh_shape), dtype='float32'),
       in_specs=(),
       out_specs=P('x', 'y'))()  # yapf: disable
 
-    initial_force = pm_forces(displacement, delta=initial_conditions)
+
+    initial_force = pm_forces(displacement,
+                              delta=initial_conditions,
+                              halo_size=halo_size)
     a = jnp.atleast_1d(a)
     dx = growth_factor(cosmo, a) * initial_force
     p = a**2 * growth_rate(cosmo, a) * jnp.sqrt(jc.background.Esqr(cosmo,
@@ -80,7 +82,7 @@ def linear_field(mesh_shape, box_size, pk, seed):
     return field
 
 
-def make_ode_fn(mesh_shape):
+def make_ode_fn(mesh_shape, halo_size=0):
 
     def nbody_ode(state, a, cosmo):
         """
@@ -88,7 +90,8 @@ def make_ode_fn(mesh_shape):
         """
         pos, vel = state
 
-        forces = pm_forces(pos, mesh_shape=mesh_shape) * 1.5 * cosmo.Omega_m
+        forces = pm_forces(pos, mesh_shape=mesh_shape,
+                           halo_size=halo_size) * 1.5 * cosmo.Omega_m
 
         # Computes the update of position (drift)
         dpos = 1. / (a**3 * jnp.sqrt(jc.background.Esqr(cosmo, a))) * vel
