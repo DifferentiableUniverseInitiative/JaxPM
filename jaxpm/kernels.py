@@ -1,6 +1,7 @@
 from functools import partial
 
 import jax.numpy as jnp
+import jax_cosmo as jc
 import numpy as np
 from jax.sharding import PartitionSpec as P
 
@@ -30,6 +31,13 @@ def fftk(shape, dtype=np.float32):
     ky, kz, kx = get_kvec(ky, kz, kx)  # The order corresponds
     # to the order of dimensions in the transposed FFT
     return kx, ky, kz
+
+
+def interpolate_power_spectrum(input, k, pk):
+
+    pk_fn = lambda x: jc.scipy.interpolate.interp(x.reshape(-1), k, pk
+                                                  ).reshape(x.shape)
+    return autoshmap(pk_fn, in_specs=P('x', 'y'), out_specs=P('x', 'y'))(input)
 
 
 def gradient_kernel(kvec, direction, order=1):
