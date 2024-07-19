@@ -47,9 +47,6 @@ def run_simulation(omega_c, sigma8):
                                       pk_fn,
                                       seed=jax.random.PRNGKey(0))
 
-    # Create particles
-    particles = jnp.stack(jnp.meshgrid(*[jnp.arange(s) for s in mesh_shape]),
-                          axis=-1).reshape([-1, 3])
 
     cosmo = jc.Planck15(Omega_c=omega_c, sigma8=sigma8)
 
