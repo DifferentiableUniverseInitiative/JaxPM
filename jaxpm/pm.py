@@ -83,7 +83,7 @@ def make_ode_fn(mesh_shape):
     return nbody_ode
 
 
-def pgd_correction(pos, mesh_shape, cosmo, params):
+def pgd_correction(pos, mesh_shape, params):
     """
     improve the short-range interactions of PM-Nbody simulations with potential gradient descent method, based on https://arxiv.org/abs/1804.00671
     args:
