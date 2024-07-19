@@ -13,6 +13,15 @@
       "contributions": [
         "ideas"
       ]
+    },
+    {
+      "login": "dlanzieri",
+      "name": "Denise Lanzieri",
+      "avatar_url": "https://avatars.githubusercontent.com/u/72620117?v=4",
+      "profile": "https://github.com/dlanzieri",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
@@ -20,5 +29,7 @@
   "projectOwner": "DifferentiableUniverseInitiative",
   "repoType": "github",
   "repoHost": "https://github.com",
-  "skipCi": true
+  "skipCi": true,
+  "commitType": "docs",
+  "commitConvention": "angular"
 }
