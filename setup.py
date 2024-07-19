@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 setup(
     name='JaxPM',
@@ -6,6 +6,6 @@ setup(
     url='https://github.com/DifferentiableUniverseInitiative/JaxPM',
     author='JaxPM developers',
     description='A dead simple FastPM implementation in JAX',
-    packages=find_packages(),    
+    packages=find_packages(),
     install_requires=['jax', 'jax_cosmo'],
 )

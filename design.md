@@ -4,14 +4,14 @@ This document aims to detail some of the API, implementation choices, and intern
 
 ## Objective
 
-Provide a user-friendly framework for distributed Particle-Mesh N-body simulations. 
+Provide a user-friendly framework for distributed Particle-Mesh N-body simulations.
 
 ## Related Work
 
 This project would be the latest iteration of a number of past libraries that have provided differentiable N-body models.
 
 - [FlowPM](https://github.com/DifferentiableUniverseInitiative/flowpm): TensorFlow
-- [vmad FastPM](https://github.com/rainwoodman/vmad/blob/master/vmad/lib/fastpm.py): VMAD 
+- [vmad FastPM](https://github.com/rainwoodman/vmad/blob/master/vmad/lib/fastpm.py): VMAD
 - Borg
 
 
