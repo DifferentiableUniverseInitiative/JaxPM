@@ -6,10 +6,18 @@ from jaxpm.kernels import cic_compensation, fftk
 
 
 def cic_paint(mesh, positions, weight=None):
-    """ Paints positions onto mesh
-  mesh: [nx, ny, nz]
-  positions: [npart, 3]
-  """
+    """
+    Paint positions onto mesh
+
+    Parameters:
+    -----------
+    mesh: [nx, ny, nz]
+    positions: [npart, 3]
+
+    Returns:
+    --------
+    mesh: [nx, ny, nz]
+    """
     positions = jnp.expand_dims(positions, 1)
     floor = jnp.floor(positions)
     connection = jnp.array([[[0, 0, 0], [1., 0, 0], [0., 1, 0], [0., 0, 1],
@@ -35,10 +43,18 @@ def cic_paint(mesh, positions, weight=None):
 
 
 def cic_read(mesh, positions):
-    """ Paints positions onto mesh
-  mesh: [nx, ny, nz]
-  positions: [npart, 3]
-  """
+    """
+    Read mesh at positions
+
+    Parameters:
+    -----------
+    mesh: [nx, ny, nz]
+    positions: [npart, 3]
+
+    Returns:
+    --------
+    values: [npart]
+    """
     positions = jnp.expand_dims(positions, 1)
     floor = jnp.floor(positions)
     connection = jnp.array([[[0, 0, 0], [1., 0, 0], [0., 1, 0], [0., 0, 1],
@@ -56,11 +72,19 @@ def cic_read(mesh, positions):
 
 
 def cic_paint_2d(mesh, positions, weight):
-    """ Paints positions onto a 2d mesh
-  mesh: [nx, ny]
-  positions: [npart, 2]
-  weight: [npart]
-  """
+    """
+    Paints positions onto 2d mesh
+
+    Parameters:
+    -----------
+    mesh: [nx, ny]
+    positions: [npart, 2]
+    weight: [npart]
+
+    Returns:
+    --------
+    mesh: [nx, ny]
+    """
     positions = jnp.expand_dims(positions, 1)
     floor = jnp.floor(positions)
     connection = jnp.array([[0, 0], [1., 0], [0., 1], [1., 1]])
@@ -86,12 +110,12 @@ def cic_paint_2d(mesh, positions, weight):
 
 def compensate_cic(field):
     """
-  Compensate for CiC painting
-  Args:
-    field: input 3D cic-painted field
-  Returns:
-    compensated_field
-  """
+    Compensate for CiC painting
+    Args:
+        field: input 3D cic-painted field
+    Returns:
+        compensated_field
+    """
     nc = field.shape
     kvec = fftk(nc)
 
