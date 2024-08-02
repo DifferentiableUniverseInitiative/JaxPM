@@ -20,13 +20,13 @@ from pmwd.vis_util import simshow
 from hpc_plotter.timer import Timer
 
 # Simulation configuration
-def run_pmwd_simulation(ptcl_grid_shape, ptcl_spacing, solver ,  iterations, output_path):
+def run_pmwd_simulation(ptcl_grid_shape, ptcl_spacing, solver ,  iterations):
 
     @jax.jit
     def simulate(omega_m, sigma8):
         
         
-        conf = Configuration(ptcl_spacing, ptcl_grid_shape, mesh_shape=1)
+        conf = Configuration(ptcl_spacing, ptcl_grid_shape=ptcl_grid_shape, mesh_shape=1,lpt_order=1,a_nbody_maxstep=1/91)
         print(conf)
         print(f'Simulating {conf.ptcl_num} particles with a {conf.mesh_shape} mesh for {conf.a_nbody_num} time steps.')
 
@@ -95,7 +95,7 @@ if __name__ == "__main__":
 
     os.makedirs(output_path, exist_ok=True)
     
-    final_field , chrono_fun = run_pmwd_simulation(mesh_shape, ptcl_spacing, solver, iterations, output_path)
+    final_field , chrono_fun = run_pmwd_simulation(mesh_shape, ptcl_spacing, solver, iterations)
     print("PMWD simulation completed.")
 
 
@@ -112,7 +112,7 @@ if __name__ == "__main__":
             'nodes': "1"
         }
     chrono_fun.print_to_csv(f"{output_path}/pmwd.csv", **metadata)
-    field_folder = f"{output_path}/final_field/1/{args.mesh_size}_{int(args.box_size)}/{args.solver}"
+    field_folder = f"{output_path}/final_field/pmwd/1/{args.mesh_size}_{int(args.box_size)}/1x1/{args.solver}/halo_0"
     os.makedirs(field_folder, exist_ok=True)
     with open(f"{field_folder}/pmwd.log", "w") as f:
         f.write(f"PMWD simulation completed.\n")

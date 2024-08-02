@@ -231,7 +231,7 @@ if __name__ == "__main__":
     # Save the final field
     nb_gpus = jax.device_count()
     pdm_str = f"{pdims[0]}x{pdims[1]}"
-    field_folder = f"{output_path}/final_field/{nb_gpus}/{mesh_size}_{int(box_size[0])}/{pdm_str}/{solver_choice}/{halo_size}"
+    field_folder = f"{output_path}/final_field/jaxpm/{nb_gpus}/{mesh_size}_{int(box_size[0])}/{pdm_str}/{solver_choice}/halo_{halo_size}"
     os.makedirs(field_folder, exist_ok=True)
     with open(f'{field_folder}/jaxpm.log', 'w') as f:
         f.write(f"Args: {args}\n")
