@@ -46,7 +46,7 @@ def fftk(shape, dtype=np.float32):
 
     @partial(autoshmap,
              in_specs=(P('x'), P('y'), P(None)),
-             out_specs=(P('x'), P(None, 'y'), P(None)))
+             out_specs=(P('x'), P(None, 'y'), P(None)),in_fourrier_space=True)
     def get_kvec(ky, kz, kx):
         return (ky.reshape([-1, 1, 1]),
                 kz.reshape([1, -1, 1]),
@@ -73,7 +73,7 @@ def interpolate_power_spectrum(input, k, pk):
 
     pk_fn = lambda x: jc.scipy.interpolate.interp(x.reshape(-1), k, pk
                                                   ).reshape(x.shape)
-    return autoshmap(pk_fn, in_specs=P('x', 'y'), out_specs=P('x', 'y'))(input)
+    return autoshmap(pk_fn, in_specs=P('x', 'y'), out_specs=P('x', 'y'),in_fourrier_space=True)(input)
 
 
 def gradient_kernel(kvec, direction, order=1):
