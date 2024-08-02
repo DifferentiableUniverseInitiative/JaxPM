@@ -1,23 +1,86 @@
+from enum import Enum
+from functools import partial
+
 import jax.numpy as jnp
+import jax_cosmo as jc
 import numpy as np
+from jax._src import mesh as mesh_lib
+from jax.sharding import PartitionSpec as P
+
+from jaxpm.distributed import autoshmap
 
 
-def fftk(shape, symmetric=True, finite=False, dtype=np.float32):
-    """ Return k_vector given a shape (nc, nc, nc) and box_size
+class PencilType(Enum):
+    NO_DECOMP = 0
+    SLAB_XY = 1
+    SLAB_YZ = 2
+    PENCILS = 3
+
+
+def get_pencil_type():
+    mesh = mesh_lib.thread_resources.env.physical_mesh
+    if mesh.empty:
+        pdims = None
+    else:
+        pdims = mesh.devices.shape[::-1]
+
+    if pdims == (1, 1) or pdims == None:
+        return PencilType.NO_DECOMP
+    elif pdims[0] == 1:
+        return PencilType.SLAB_XY
+    elif pdims[1] == 1:
+        return PencilType.SLAB_YZ
+    else:
+        return PencilType.PENCILS
+
+
+def fftk(shape, dtype=np.float32):
+    """
+    Generate Fourier transform wave numbers for a given mesh.
+
+    Args:
+        nc (int): Shape of the mesh grid.
+
+    Returns:
+        list: List of wave number arrays for each dimension in
+        the order [kx, ky, kz].
   """
-    k = []
-    for d in range(len(shape)):
-        kd = np.fft.fftfreq(shape[d])
-        kd *= 2 * np.pi
-        kdshape = np.ones(len(shape), dtype='int')
-        if symmetric and d == len(shape) - 1:
-            kd = kd[:shape[d] // 2 + 1]
-        kdshape[d] = len(kd)
-        kd = kd.reshape(kdshape)
+    kx, ky, kz = [jnp.fft.fftfreq(s, dtype=dtype) * 2 * np.pi for s in shape]
 
-        k.append(kd.astype(dtype))
-    del kd, kdshape
-    return k
+    @partial(autoshmap,
+             in_specs=(P('x'), P('y'), P(None)),
+             out_specs=(P('x'), P(None, 'y'), P(None)),
+             in_fourrier_space=True)
+    def get_kvec(ky, kz, kx):
+        return (ky.reshape([-1, 1, 1]),
+                kz.reshape([1, -1, 1]),
+                kx.reshape([1, 1, -1])) # yapf: disable
+
+    pencil_type = get_pencil_type()
+    # YZ returns Y pencil
+    # XY and pencils returns a Z pencil
+    # NO_DECOMP returns a X pencil
+    if pencil_type == PencilType.NO_DECOMP:
+        kx, ky, kz = get_kvec(kx, ky, kz)  # Z Y X ==> X pencil
+    elif pencil_type == PencilType.SLAB_YZ:
+        kz, kx, ky = get_kvec(kz, kx, ky)  # X Z Y ==> Y pencil
+    elif pencil_type == PencilType.SLAB_XY or pencil_type == PencilType.PENCILS:
+        ky, kz, kx = get_kvec(ky, kz, kx)  # Z X Y ==> Z pencil
+    else:
+        raise ValueError("Unknown pencil type")
+
+    # to the order of dimensions in the transposed FFT
+    return kx, ky, kz
+
+
+def interpolate_power_spectrum(input, k, pk):
+
+    pk_fn = lambda x: jc.scipy.interpolate.interp(x.reshape(-1), k, pk
+                                                  ).reshape(x.shape)
+    return autoshmap(pk_fn,
+                     in_specs=P('x', 'y'),
+                     out_specs=P('x', 'y'),
+                     in_fourrier_space=True)(input)
 
 
 def gradient_kernel(kvec, direction, order=1):
@@ -60,11 +123,7 @@ def laplace_kernel(kvec):
     Complex kernel
   """
     kk = sum(ki**2 for ki in kvec)
-    mask = (kk == 0).nonzero()
-    kk[mask] = 1
-    wts = 1. / kk
-    imask = (~(kk == 0)).astype(int)
-    wts *= imask
+    wts = jnp.where(kk == 0, 1., 1. / kk)
     return wts
 
 
