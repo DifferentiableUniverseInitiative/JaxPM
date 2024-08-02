@@ -1,3 +1,4 @@
+from enum import Enum
 from functools import partial
 
 import jax.numpy as jnp
@@ -7,29 +8,31 @@ from jax._src import mesh as mesh_lib
 from jax.sharding import PartitionSpec as P
 
 from jaxpm.distributed import autoshmap
-from enum import Enum
+
 
 class PencilType(Enum):
-  NO_DECOMP = 0
-  SLAB_XY = 1
-  SLAB_YZ = 2
-  PENCILS = 3
+    NO_DECOMP = 0
+    SLAB_XY = 1
+    SLAB_YZ = 2
+    PENCILS = 3
+
 
 def get_pencil_type():
-  mesh = mesh_lib.thread_resources.env.physical_mesh
-  if mesh.empty:
-    pdims = None
-  else:
-    pdims = mesh.devices.shape[::-1]
+    mesh = mesh_lib.thread_resources.env.physical_mesh
+    if mesh.empty:
+        pdims = None
+    else:
+        pdims = mesh.devices.shape[::-1]
 
-  if pdims == (1, 1) or pdims == None:
-    return PencilType.NO_DECOMP
-  elif pdims[0] == 1:
-    return PencilType.SLAB_XY
-  elif pdims[1] == 1:
-    return PencilType.SLAB_YZ
-  else:
-    return PencilType.PENCILS
+    if pdims == (1, 1) or pdims == None:
+        return PencilType.NO_DECOMP
+    elif pdims[0] == 1:
+        return PencilType.SLAB_XY
+    elif pdims[1] == 1:
+        return PencilType.SLAB_YZ
+    else:
+        return PencilType.PENCILS
+
 
 def fftk(shape, dtype=np.float32):
     """
@@ -46,22 +49,23 @@ def fftk(shape, dtype=np.float32):
 
     @partial(autoshmap,
              in_specs=(P('x'), P('y'), P(None)),
-             out_specs=(P('x'), P(None, 'y'), P(None)),in_fourrier_space=True)
+             out_specs=(P('x'), P(None, 'y'), P(None)),
+             in_fourrier_space=True)
     def get_kvec(ky, kz, kx):
         return (ky.reshape([-1, 1, 1]),
                 kz.reshape([1, -1, 1]),
                 kx.reshape([1, 1, -1])) # yapf: disable
 
-    pencil_type = get_pencil_type() 
+    pencil_type = get_pencil_type()
     # YZ returns Y pencil
     # XY and pencils returns a Z pencil
     # NO_DECOMP returns a X pencil
     if pencil_type == PencilType.NO_DECOMP:
-        kx, ky, kz = get_kvec(kx, ky, kz) # Z Y X ==> X pencil
+        kx, ky, kz = get_kvec(kx, ky, kz)  # Z Y X ==> X pencil
     elif pencil_type == PencilType.SLAB_YZ:
-        kz, kx, ky = get_kvec(kz, kx, ky) # X Z Y ==> Y pencil
+        kz, kx, ky = get_kvec(kz, kx, ky)  # X Z Y ==> Y pencil
     elif pencil_type == PencilType.SLAB_XY or pencil_type == PencilType.PENCILS:
-        ky, kz, kx = get_kvec(ky, kz, kx) # Z X Y ==> Z pencil
+        ky, kz, kx = get_kvec(ky, kz, kx)  # Z X Y ==> Z pencil
     else:
         raise ValueError("Unknown pencil type")
 
@@ -73,7 +77,10 @@ def interpolate_power_spectrum(input, k, pk):
 
     pk_fn = lambda x: jc.scipy.interpolate.interp(x.reshape(-1), k, pk
                                                   ).reshape(x.shape)
-    return autoshmap(pk_fn, in_specs=P('x', 'y'), out_specs=P('x', 'y'),in_fourrier_space=True)(input)
+    return autoshmap(pk_fn,
+                     in_specs=P('x', 'y'),
+                     out_specs=P('x', 'y'),
+                     in_fourrier_space=True)(input)
 
 
 def gradient_kernel(kvec, direction, order=1):

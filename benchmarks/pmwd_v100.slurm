@@ -161,10 +161,7 @@ echo "Output dir is  : $out_dir"
 for pr in "${precisions[@]}"; do
     for g in "${grid[@]}"; do
         for solver in "${solvers[@]}"; do
-           slaunch bench_pmwd.py -m $g -b $g -pr $pr -s $solver -i 4 -o $out_dir -f  
+           slaunch bench_pmwd.py -m $g -b $g -pr $pr -s $solver -i 4 -o $out_dir -f
         done
     done
 done
-
-
-

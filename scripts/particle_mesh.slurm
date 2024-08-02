@@ -1,23 +1,23 @@
 #!/bin/bash
-########################################## 
-## SELECT EITHER tkc@a100 OR tkc@v100 ## 
-########################################## 
+##########################################
+## SELECT EITHER tkc@a100 OR tkc@v100 ##
+##########################################
 #SBATCH --account tkc@a100
-########################################## 
+##########################################
 #SBATCH --job-name=Particle-Mesh   # nom du job
 # Il est possible d'utiliser une autre partition que celle par default
 # en activant l'une des 5 directives suivantes :
-########################################## 
-## SELECT EITHER a100  or v100-32g   ## 
-########################################## 
+##########################################
+## SELECT EITHER a100  or v100-32g   ##
+##########################################
 #SBATCH -C a100
-########################################## 
+##########################################
 #******************************************
-########################################## 
+##########################################
 ## SELECT Number of nodes and GPUs per node
 ## For A100 ntasks-per-node and gres=gpu should be 8
 ## For V100 ntasks-per-node and gres=gpu should be 4
-########################################## 
+##########################################
 #SBATCH --nodes=1                    # nombre de noeud
 #SBATCH --ntasks-per-node=8          # nombre de tache MPI par noeud (= nombre de GPU par noeud)
 #SBATCH --gres=gpu:8                # nombre de GPU par nÅ“ud (max 8 avec gpu_p2, gpu_p5)
@@ -57,7 +57,7 @@ fi
 
 # Chargement des modules
 module load nvidia-compilers/23.9 cuda/12.2.0 cudnn/8.9.7.29-cuda  openmpi/4.1.5-cuda nccl/2.18.5-1-cuda cmake
-module load nvidia-nsight-systems/2024.1.1.59 
+module load nvidia-nsight-systems/2024.1.1.59
 
 echo "The number of nodes allocated for this job is: $num_nodes"
 echo "The number of GPUs allocated for this job is: $nb_gpus"
@@ -116,7 +116,7 @@ set -x
 
 # Pour la partition "gpu_p5", le code doit etre compile avec les modules compatibles
 # Execution du code avec binding via bind_gpu.sh : 1 GPU par tache
- 
+
 
 
 
