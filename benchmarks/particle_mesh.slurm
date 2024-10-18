@@ -1,40 +1,15 @@
 #!/bin/bash
-##########################################
-## SELECT EITHER tkc@a100 OR tkc@v100 ##
-##########################################
-#SBATCH --account tkc@a100
-##########################################
-#SBATCH --job-name=1N-FFT-Mesh   # nom du job
-# Il est possible d'utiliser une autre partition que celle par default
-# en activant l'une des 5 directives suivantes :
-##########################################
-## SELECT EITHER a100  or v100-32g   ##
-##########################################
-#SBATCH -C a100
-##########################################
-#******************************************
-##########################################
-## SELECT Number of nodes and GPUs per node
-## For A100 ntasks-per-node and gres=gpu should be 8
-## For V100 ntasks-per-node and gres=gpu should be 4
-##########################################
-#SBATCH --nodes=1                    # nombre de noeud
-#SBATCH --ntasks-per-node=8          # nombre de tache MPI par noeud (= nombre de GPU par noeud)
-#SBATCH --gres=gpu:8                # nombre de GPU par nÅ“ud (max 8 avec gpu_p2, gpu_p5)
-##########################################
-## Le nombre de CPU par tache doit etre adapte en fonction de la partition utilisee. Sachant
-## qu'ici on ne reserve qu'un seul GPU par tache (soit 1/4 ou 1/8 des GPU du noeud suivant
-## la partition), l'ideal est de reserver 1/4 ou 1/8 des CPU du noeud pour chaque tache:
-##########################################
+##############################################################################################################################
+# USAGE:sbatch --account=tkc@a100 --nodes=1 --gres=gpu:1 --tasks-per-node=1 -C a100  benchmarks/particle_mesh_a100.slurm 
+##############################################################################################################################
+#SBATCH --job-name=Particle-Mesh   # nom du job
 #SBATCH --cpus-per-task=8           # nombre de CPU par tache pour gpu_p5 (1/8 du noeud 8-GPU)
-##########################################
-# /!\ Attention, "multithread" fait reference a l'hyperthreading dans la terminologie Slurm
 #SBATCH --hint=nomultithread         # hyperthreading desactive
 #SBATCH --time=04:00:00              # temps d'execution maximum demande (HH:MM:SS)
 #SBATCH --output=%x_%N_a100.out # nom du fichier de sortie
-#SBATCH --error=%x_%N_a100.out  # nom du fichier d'erreur (ici commun avec la sortie)
+#SBATCH --error=%x_%N_a100.err  # nom du fichier d'erreur (ici commun avec la sortie)
+#SBATCH --exclusive                  # ressources dediees
 ##SBATCH --qos=qos_gpu-dev
-## SBATCH --exclusive                  # ressources dediees
 # Nettoyage des modules charges en interactif et herites par defaut
 num_nodes=$SLURM_JOB_NUM_NODES
 num_gpu_per_node=$SLURM_NTASKS_PER_NODE
@@ -44,12 +19,11 @@ nb_gpus=$(( num_nodes * num_gpu_per_node))
 
 module purge
 
-echo "Job constraint: $SLURM_JOB_CONSTRAINT"
 echo "Job partition: $SLURM_JOB_PARTITION"
 # Decommenter la commande module suivante si vous utilisez la partition "gpu_p5"
 # pour avoir acces aux modules compatibles avec cette partition
 
-if [ $SLURM_JOB_PARTITION -eq gpu_p5 ]; then
+if [[ "$SLURM_JOB_PARTITION" == "gpu_p5" ]]; then
     module load cpuarch/amd
     source /gpfsdswork/projects/rech/tkc/commun/venv/a100/bin/activate
     gpu_name=a100
@@ -66,8 +40,10 @@ module load nvidia-nsight-systems/2024.1.1.59
 echo "The number of nodes allocated for this job is: $num_nodes"
 echo "The number of GPUs allocated for this job is: $nb_gpus"
 
+export EQX_ON_ERROR=nan
 export ENABLE_PERFO_STEP=NVTX
 export MPI4JAX_USE_CUDA_MPI=1
+
 function profile_python() {
     if [ $# -lt 1 ]; then
         echo "Usage: profile_python <python_script> [arguments for the script]"
@@ -75,14 +51,14 @@ function profile_python() {
     fi
 
     local script_name=$(basename "$1" .py)
-    local output_dir="prof_traces/$script_name"
+    local output_dir="prof_traces/$gpu_name/$nb_gpus/$script_name"
     local report_dir="out_prof/$gpu_name/$nb_gpus/$script_name"
 
     if [ $OUTPUT_FOLDER_ARGS -eq 1 ]; then
         local args=$(echo "${@:2}" | tr ' ' '_')
         # Remove characters '/' and '-' from folder name
         args=$(echo "$args" | tr -d '/-')
-        output_dir="prof_traces/$script_name/$args"
+        output_dir="prof_traces/$gpu_name/$nb_gpus/$script_name/$args"
         report_dir="out_prof/$gpu_name/$nb_gpus/$script_name/$args"
     fi
 
@@ -99,13 +75,13 @@ function run_python() {
     fi
 
     local script_name=$(basename "$1" .py)
-    local output_dir="traces/$script_name"
+    local output_dir="traces/$gpu_name/$nb_gpus/$script_name"
 
     if [ $OUTPUT_FOLDER_ARGS -eq 1 ]; then
         local args=$(echo "${@:2}" | tr ' ' '_')
         # Remove characters '/' and '-' from folder name
         args=$(echo "$args" | tr -d '/-')
-        output_dir="traces/$script_name/$args"
+        output_dir="traces/$gpu_name/$nb_gpus/$script_name/$args"
     fi
 
     mkdir -p "$output_dir"
@@ -142,12 +118,11 @@ pdims_table[8]="2x4 1x8 8x1 4x2"
 pdims_table[16]="4x4 1x16 16x1"
 pdims_table[32]="4x8 8x4 1x32 32x1"
 pdims_table[64]="8x8 16x4 1x64 64x1"
-pdims_table[128]="8x16 16x8 4x32 32x4 1x128 128x1 2x64 64x2"
-pdims_table[160]="8x20 20x8 16x10 10x16 5x32 32x5 1x160 160x1 2x80 80x2 4x40 40x4"
-
+pdims_table[128]="8x16 16x8 1x128 128x1"
+pdims_table[256]="16x16 1x256 256x1"
 
 # mpch=(128 256 512 1024 2048 4096)
-grid=(256 512 1024 2048 4096)
+grid=(256 512 1024 2048 4096 8192)
 precisions=(float32 float64)
 pdim="${pdims_table[$nb_gpus]}"
 solvers=(lpt lfm)
@@ -164,8 +139,9 @@ fi
 
 # GPU name is a100 if num_gpu_per_node is 8, otherwise it is v100
 out_dir="pm_prof/$gpu_name/$nb_gpus"
-
-echo "Output dir is  : $out_dir"
+trace_dir="traces/$gpu_name/$nb_gpus/bench_pm"
+echo "Output dir is  : $out_dir" 
+echo "Trace dir is  : $trace_dir"
 
 for pr in "${precisions[@]}"; do
     for g in "${grid[@]}"; do
@@ -175,5 +151,7 @@ for pr in "${precisions[@]}"; do
                 slaunch bench_pm.py -m $g -b $g -p $p -hs $halo_size -pr $pr -s $solver -i 4 -o $out_dir -f -n $num_nodes
             done
         done
+        # delete crash core dump files
+        rm -f core.python.*
     done
 done
