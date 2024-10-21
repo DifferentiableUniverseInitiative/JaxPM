@@ -22,13 +22,13 @@ def pm_forces(positions, mesh_shape=None, delta=None, r_split=0, halo_size=0):
         assert (delta is not None
                 ), "If mesh_shape is not provided, delta should be provided"
         mesh_shape = delta.shape
-    kvec = fftk(mesh_shape)
 
     if delta is None:
         delta_k = fft3d(cic_paint_dx(positions, halo_size=halo_size))
     else:
         delta_k = fft3d(delta)
 
+    kvec = fftk(delta_k)
     # Computes gravitational potential
     pot_k = delta_k * laplace_kernel(kvec) * longrange_kernel(kvec,
                                                               r_split=r_split)
@@ -137,15 +137,16 @@ def linear_field(mesh_shape, box_size, pk, seed):
     """
     Generate initial conditions.
     """
-    kvec = fftk(mesh_shape)
+    # Initialize a random field with one slice on each gpu
+    field = normal_field(mesh_shape, seed=seed)
+    field = fft3d(field)
+    kvec = fftk(field)
     kmesh = sum((kk / box_size[i] * mesh_shape[i])**2
                 for i, kk in enumerate(kvec))**0.5
     pkmesh = pk(kmesh) * (mesh_shape[0] * mesh_shape[1] * mesh_shape[2]) / (
         box_size[0] * box_size[1] * box_size[2])
 
-    # Initialize a random field with one slice on each gpu
-    field = normal_field(mesh_shape, seed=seed)
-    field = fft3d(field) * pkmesh**0.5
+    field = field * (pkmesh)**0.5
     field = ifft3d(field)
     return field
 
