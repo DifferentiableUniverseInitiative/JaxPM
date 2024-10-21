@@ -222,4 +222,3 @@ def compensate_cic(field):
     delta_k = jnp.fft.rfftn(field)
     delta_k = cic_compensation(kvec) * delta_k
     return jnp.fft.irfftn(delta_k)
-
