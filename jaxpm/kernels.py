@@ -43,7 +43,7 @@ def interpolate_power_spectrum(input, k, pk, sharding=None):
 def gradient_kernel(kvec, direction, order=1):
     """
     Computes the gradient kernel in the requested direction
-    
+
     Parameters
     -----------
     kvec: list
@@ -84,8 +84,8 @@ def invlaplace_kernel(kvec):
         Complex kernel values
     """
     kk = sum(ki**2 for ki in kvec)
-    kk_nozeros = jnp.where(kk==0, 1, kk) 
-    return - jnp.where(kk==0, 0, 1 / kk_nozeros)
+    kk_nozeros = jnp.where(kk == 0, 1, kk)
+    return -jnp.where(kk == 0, 0, 1 / kk_nozeros)
 
 
 def longrange_kernel(kvec, r_split):
@@ -98,12 +98,12 @@ def longrange_kernel(kvec, r_split):
         List of wave-vectors
     r_split: float
         Splitting radius
-        
+
     Returns
     --------
     wts: array
         Complex kernel values
-    
+
     TODO: @modichirag add documentation
     """
     if r_split != 0:
@@ -124,7 +124,7 @@ def cic_compensation(kvec):
     -----------
     kvec: list
         List of wave-vectors
-        
+
     Returns:
     --------
     wts: array

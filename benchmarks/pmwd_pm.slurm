@@ -1,6 +1,6 @@
 #!/bin/bash
 ##############################################################################################################################
-# USAGE:sbatch --account=tkc@a100 --nodes=1 --gres=gpu:1 --tasks-per-node=1 -C a100  benchmarks/particle_mesh_a100.slurm 
+# USAGE:sbatch --account=tkc@a100 --nodes=1 --gres=gpu:1 --tasks-per-node=1 -C a100  benchmarks/particle_mesh_a100.slurm
 ##############################################################################################################################
 #SBATCH --job-name=Particle-Mesh   # nom du job
 #SBATCH --cpus-per-task=8           # nombre de CPU par tache pour gpu_p5 (1/8 du noeud 8-GPU)
@@ -126,7 +126,7 @@ fi
 
 out_dir="pm_prof/$gpu_name/$nb_gpus"
 trace_dir="traces/$gpu_name/$nb_gpus/bench_pmwd"
-echo "Output dir is  : $out_dir" 
+echo "Output dir is  : $out_dir"
 echo "Trace dir is  : $trace_dir"
 
 for pr in "${precisions[@]}"; do
