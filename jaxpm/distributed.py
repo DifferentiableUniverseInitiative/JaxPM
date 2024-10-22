@@ -153,9 +153,9 @@ def normal_field(mesh_shape, seed, sharding):
         def normal(keys, shape, dtype):
             idx = lax.axis_index(x_axis)
             if not single_axis:
-              y_index = lax.axis_index(y_axis)
-              x_size = lax.psum(1, axis_name=x_axis)
-              idx += y_index * x_size
+                y_index = lax.axis_index(y_axis)
+                x_size = lax.psum(1, axis_name=x_axis)
+                idx += y_index * x_size
 
             return jax.random.normal(key=keys[idx], shape=shape, dtype=dtype)
 
