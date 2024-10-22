@@ -126,7 +126,7 @@ def cic_compensation(kvec):
     wts: array
         Complex kernel values
     """
-    kwts = [np.sinc(kvec[i] / (2 * np.pi)) for i in range(3)]
+    kwts = [jnp.sinc(kvec[i] / (2 * np.pi)) for i in range(3)]
     wts = (kwts[0] * kwts[1] * kwts[2])**(-2)
     return wts
 
