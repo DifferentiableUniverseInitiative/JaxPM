@@ -18,18 +18,29 @@ def pm_forces(positions,
               mesh_shape=None,
               delta=None,
               r_split=0,
+              paint_particles=False,
               halo_size=0,
               sharding=None):
     """
     Computes gravitational forces on particles using a PM scheme
     """
+    print(f"pm_forces particles are {positions}")
+    original_shape = positions.shape
     if mesh_shape is None:
         assert (delta is not None),\
           "If mesh_shape is not provided, delta should be provided"
         mesh_shape = delta.shape
 
+    positions = positions.reshape((*mesh_shape, 3))
+    if paint_particles:
+        paint_fn = partial(cic_paint, grid_mesh=jnp.zeros(mesh_shape))
+        read_fn = partial(cic_read, positions=positions)
+    else:
+        paint_fn = cic_paint_dx
+        read_fn = cic_read_dx
+
     if delta is None:
-        field = cic_paint_dx(positions, halo_size=halo_size, sharding=sharding)
+        field = paint_fn(positions, halo_size=halo_size, sharding=sharding)
         delta_k = fft3d(field)
     elif jnp.isrealobj(delta):
         delta_k = fft3d(delta)
@@ -42,33 +53,44 @@ def pm_forces(positions,
         kvec, r_split=r_split)
     # Computes gravitational forces
     forces = jnp.stack([
-        cic_read_dx(ifft3d(-gradient_kernel(kvec, i) * pot_k),
+        read_fn(ifft3d(-gradient_kernel(kvec, i) * pot_k),
         halo_size=halo_size,
         sharding=sharding) for i in range(3)], axis=-1) # yapf: disable
 
     return forces
 
 
-def lpt(cosmo, initial_conditions, a, halo_size=0, sharding=None, order=1):
+def lpt(cosmo,
+        initial_conditions,
+        particles=None,
+        a=0.1,
+        halo_size=0,
+        sharding=None,
+        order=1):
     """
     Computes first and second order LPT displacement and momentum,
     e.g. Eq. 2 and 3 [Jenkins2010](https://arxiv.org/pdf/0910.0258)
     """
+    print(f"particles are {particles}")
     gpu_mesh = sharding.mesh if sharding is not None else None
     spec = sharding.spec if sharding is not None else P()
     local_mesh_shape = (*get_local_shape(initial_conditions.shape, sharding), 3) # yapf: disable
-    displacement = autoshmap(
-      partial(jnp.zeros, shape=(local_mesh_shape), dtype='float32'),
-      gpu_mesh=gpu_mesh,
-      in_specs=(),
-      out_specs=spec)()  # yapf: disable
-
+    paint_particles = True
+    original_shape = particles.shape if particles is not None else (*initial_conditions.shape, 3) # yapf: disable
+    if particles is None:
+        paint_particles = False
+        particles = autoshmap(
+          partial(jnp.zeros, shape=(local_mesh_shape), dtype='float32'),
+          gpu_mesh=gpu_mesh,
+          in_specs=(),
+          out_specs=spec)()  # yapf: disable
 
     a = jnp.atleast_1d(a)
     E = jnp.sqrt(jc.background.Esqr(cosmo, a))
     delta_k = fft3d(initial_conditions)
-    initial_force = pm_forces(displacement,
+    initial_force = pm_forces(particles,
                               delta=delta_k,
+                              paint_particles=paint_particles,
                               halo_size=halo_size,
                               sharding=sharding)
     dx = growth_factor(cosmo, a) * initial_force
@@ -100,6 +122,7 @@ def lpt(cosmo, initial_conditions, a, halo_size=0, sharding=None, order=1):
         delta_k2 = fft3d(delta2)
         init_force2 = pm_forces(displacement,
                                 delta=delta_k2,
+                                paint_particles=paint_particles,
                                 halo_size=halo_size,
                                 sharding=sharding)
         # NOTE: growth_factor_second is renormalized: - D2 = 3/7 * growth_factor_second
@@ -111,7 +134,7 @@ def lpt(cosmo, initial_conditions, a, halo_size=0, sharding=None, order=1):
         p += p2
         f += f2
 
-    return dx, p, f
+    return dx.reshape(original_shape), p, f
 
 
 def linear_field(mesh_shape, box_size, pk, seed, sharding=None):

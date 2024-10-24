@@ -7,5 +7,5 @@ setup(
     author='JaxPM developers',
     description='A dead simple FastPM implementation in JAX',
     packages=find_packages(),
-    install_requires=['jax', 'jax_cosmo'],
+    install_requires=['jax', 'jax_cosmo','jaxdecomp'],
 )
