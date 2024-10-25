@@ -30,7 +30,7 @@ def autoshmap(
 
 
 def fft3d(x):
-    return jaxdecomp.pfft3d(x.astype(jnp.complex64))
+    return jaxdecomp.pfft3d(x)
 
 
 def ifft3d(x):
