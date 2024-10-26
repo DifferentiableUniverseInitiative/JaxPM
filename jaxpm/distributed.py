@@ -40,7 +40,7 @@ def ifft3d(x):
 def get_halo_size(halo_size, sharding):
     gpu_mesh = sharding.mesh if sharding is not None else None
     if gpu_mesh is None or gpu_mesh.empty:
-        zero_ext = (0, 0, 0)
+        zero_ext = (0, 0)
         zero_tuple = (0, 0)
         return (zero_tuple, zero_tuple, zero_tuple), zero_ext
     else:

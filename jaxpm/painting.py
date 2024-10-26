@@ -5,8 +5,8 @@ import jax.lax as lax
 import jax.numpy as jnp
 from jax.sharding import PartitionSpec as P
 
-from jaxpm.distributed import (autoshmap, get_halo_size, halo_exchange,
-                               slice_pad, slice_unpad, fft3d, ifft3d)
+from jaxpm.distributed import (autoshmap, fft3d, get_halo_size, halo_exchange,
+                               ifft3d, slice_pad, slice_unpad)
 from jaxpm.kernels import cic_compensation, fftk
 from jaxpm.painting_utils import gather, scatter
 

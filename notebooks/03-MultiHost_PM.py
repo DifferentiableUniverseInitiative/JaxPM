@@ -7,21 +7,21 @@ jax.distributed.initialize()
 rank = jax.process_index()
 size = jax.process_count()
 
+from functools import partial
+
 import jax.numpy as jnp
 import jax_cosmo as jc
-
-from jaxpm.kernels import interpolate_power_spectrum
-from jaxpm.painting import cic_paint_dx
-from jaxpm.pm import linear_field, lpt, make_ode_fn
-
+import numpy as np
+from diffrax import (ConstantStepSize, LeapfrogMidpoint, ODETerm, SaveAt,
+                     diffeqsolve)
 from jax.experimental.mesh_utils import create_device_mesh
 from jax.experimental.multihost_utils import process_allgather
 from jax.sharding import Mesh, NamedSharding
 from jax.sharding import PartitionSpec as P
-from functools import partial
-import numpy as np
 
-from diffrax import ConstantStepSize, LeapfrogMidpoint, ODETerm, SaveAt, diffeqsolve
+from jaxpm.kernels import interpolate_power_spectrum
+from jaxpm.painting import cic_paint_dx
+from jaxpm.pm import linear_field, lpt, make_ode_fn
 
 all_gather = partial(process_allgather, tiled=True)
 
@@ -84,7 +84,8 @@ def run_simulation(omega_c, sigma8):
     return initial_conditions, dx, res.ys, res.stats
 
 
-initial_conditions , lpt_displacements , ode_solutions , solver_stats = run_simulation(0.25, 0.8)
+initial_conditions, lpt_displacements, ode_solutions, solver_stats = run_simulation(
+    0.25, 0.8)
 print(f"[{rank}] Simulation completed")
 print(f"[{rank}] Solver stats: {solver_stats}")
 
@@ -95,10 +96,9 @@ ode_solutions = [all_gather(sol) for sol in ode_solutions]
 
 if rank == 0:
     np.savez("multihost_pm.npz",
-                initial_conditions=initial_conditions,
-                lpt_displacements=lpt_displacements,
-                ode_solutions=ode_solutions,
-                solver_stats=solver_stats)
+             initial_conditions=initial_conditions,
+             lpt_displacements=lpt_displacements,
+             ode_solutions=ode_solutions,
+             solver_stats=solver_stats)
 
 print(f"[{rank}] Simulation results saved")
-    

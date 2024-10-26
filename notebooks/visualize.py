@@ -1,6 +1,7 @@
-import numpy as np
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpy as np
+
 
 def plot_fields(fields_dict, sum_over=None):
     """
@@ -23,8 +24,10 @@ def plot_fields(fields_dict, sum_over=None):
         slicing = tuple(slicing)
 
         # Sum projection over the specified axis and plot
-        axes[row, proj_axis].imshow(field[slicing].sum(axis=proj_axis) + 1, 
-                                    cmap='magma', extent=[0, field.shape[proj_axis], 0, field.shape[proj_axis]])
+        axes[row, proj_axis].imshow(
+            field[slicing].sum(axis=proj_axis) + 1,
+            cmap='magma',
+            extent=[0, field.shape[proj_axis], 0, field.shape[proj_axis]])
         axes[row, proj_axis].set_xlabel('Mpc/h')
         axes[row, proj_axis].set_ylabel('Mpc/h')
         axes[row, proj_axis].set_title(title)
@@ -32,7 +35,8 @@ def plot_fields(fields_dict, sum_over=None):
     # Plot each field across the three axes
     for i, (name, field) in enumerate(fields_dict.items()):
         for proj_axis in range(3):
-            plot_subplots(proj_axis, field, i, f"{name} projection {proj_axis}")
+            plot_subplots(proj_axis, field, i,
+                          f"{name} projection {proj_axis}")
 
     plt.tight_layout()
     plt.show()
