@@ -30,11 +30,10 @@ devices = create_device_mesh(pdims)
 mesh = Mesh(devices, axis_names=('x', 'y'))
 sharding = NamedSharding(mesh, P('x', 'y'))
 
-mesh_shape = [2024, 1024, 1024]
-box_size = [1024., 1024., 1024.]
-halo_size = 512
-snapshots = jnp.linspace(0.1, 1., 2)
-
+mesh_shape = [512, 512, 512]
+box_size = [500., 500., 1000.]
+halo_size = 64
+snapshots = jnp.linspace(0.1,1.,2)
 
 @jax.jit
 def run_simulation(omega_c, sigma8):
@@ -59,8 +58,7 @@ def run_simulation(omega_c, sigma8):
     # Initial displacement
     dx, p, _ = lpt(cosmo,
                    initial_conditions,
-                   particles,
-                   0.1,
+                   a=0.1,
                    halo_size=halo_size,
                    sharding=sharding)
 
@@ -90,15 +88,16 @@ print(f"[{rank}] Simulation completed")
 print(f"[{rank}] Solver stats: {solver_stats}")
 
 # Gather the results
-initial_conditions = all_gather(initial_conditions)
-lpt_displacements = all_gather(lpt_displacements)
-ode_solutions = [all_gather(sol) for sol in ode_solutions]
+
+pm_dict = {"initial_conditions": all_gather(initial_conditions),
+           "lpt_displacements": all_gather(lpt_displacements),
+           "solver_stats": solver_stats}
+
+for i in range(len(ode_solutions)):
+    sol = ode_solutions[i]
+    pm_dict[f"ode_solution_{i}"] = all_gather(sol)
 
 if rank == 0:
-    np.savez("multihost_pm.npz",
-             initial_conditions=initial_conditions,
-             lpt_displacements=lpt_displacements,
-             ode_solutions=ode_solutions,
-             solver_stats=solver_stats)
+    np.savez("multihost_pm.npz", **pm_dict)
 
 print(f"[{rank}] Simulation results saved")
