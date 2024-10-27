@@ -62,11 +62,9 @@ def plot_fields_single_projection(fields_dict, sum_over=None):
         slicing = tuple(slicing)
 
         # Sum projection over axis 0 and plot
-        axes[i].imshow(
-            field[slicing].sum(axis=0) + 1,
-            cmap='magma',
-            extent=[0, field.shape[1], 0, field.shape[2]]
-        )
+        axes[i].imshow(field[slicing].sum(axis=0) + 1,
+                       cmap='magma',
+                       extent=[0, field.shape[1], 0, field.shape[2]])
         axes[i].set_xlabel('Mpc/h')
         axes[i].set_ylabel('Mpc/h')
         axes[i].set_title(f"{name} projection 0")

@@ -33,7 +33,8 @@ sharding = NamedSharding(mesh, P('x', 'y'))
 mesh_shape = [512, 512, 512]
 box_size = [500., 500., 1000.]
 halo_size = 64
-snapshots = jnp.linspace(0.1,1.,2)
+snapshots = jnp.linspace(0.1, 1., 2)
+
 
 @jax.jit
 def run_simulation(omega_c, sigma8):
@@ -89,9 +90,11 @@ print(f"[{rank}] Solver stats: {solver_stats}")
 
 # Gather the results
 
-pm_dict = {"initial_conditions": all_gather(initial_conditions),
-           "lpt_displacements": all_gather(lpt_displacements),
-           "solver_stats": solver_stats}
+pm_dict = {
+    "initial_conditions": all_gather(initial_conditions),
+    "lpt_displacements": all_gather(lpt_displacements),
+    "solver_stats": solver_stats
+}
 
 for i in range(len(ode_solutions)):
     sol = ode_solutions[i]
