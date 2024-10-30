@@ -9,8 +9,9 @@ This collection of notebooks demonstrates how to perform Particle Mesh (PM) simu
    - Uses JAXPM to run simulations with absolute particle positions and Cloud-in-Cell (CIC) painting.
 
 2. **[Advanced Particle Mesh Simulation on a Single GPU](02-Advanced_usage.ipynb)**
-   - Explores Lagrangian Perturbation Theory (LPT) simulations.
-   - Introduces weighted field projections, boundary handling, and adjustments to halo sizes.
+   - Explore using diffrax solvers in the ODE step.
+   - Explores second order Lagrangian Perturbation Theory (LPT) simulations.
+   - Introduces weighted density field projections
 
 3. **[Multi-GPU Particle Mesh Simulation with Halo Exchange](03-MultiGPU_PM_Halo.ipynb)**
    - Extends PM simulation to multi-GPU setups with halo exchange.
