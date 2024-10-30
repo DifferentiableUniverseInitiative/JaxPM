@@ -1,6 +1,6 @@
 import jax.numpy as np
+from jax.numpy import interp
 from jax_cosmo.background import *
-from jax_cosmo.scipy.interpolate import interp
 from jax_cosmo.scipy.ode import odeint
 
 
