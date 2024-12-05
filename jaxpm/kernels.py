@@ -67,21 +67,28 @@ def gradient_kernel(kvec, direction, order=1):
         return wts
 
 
-def invlaplace_kernel(kvec):
+def invlaplace_kernel(kvec, fd=False):
     """
-    Compute the inverse Laplace kernel
+    Compute the inverse Laplace kernel.
+
+    cf. [Feng+2016](https://arxiv.org/pdf/1603.00476)
 
     Parameters
     -----------
     kvec: list
         List of wave-vectors
+    fd: bool
+        Finite difference kernel
 
     Returns
     --------
     wts: array
         Complex kernel values
     """
-    kk = sum(ki**2 for ki in kvec)
+    if fd:
+        kk = sum((ki * jnp.sinc(ki / (2 * jnp.pi)))**2 for ki in kvec)
+    else:
+        kk = sum(ki**2 for ki in kvec)
     kk_nozeros = jnp.where(kk == 0, 1, kk)
     return -jnp.where(kk == 0, 0, 1 / kk_nozeros)
 
