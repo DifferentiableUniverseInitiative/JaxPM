@@ -18,14 +18,13 @@ import numpy as np
 from diffrax import (ConstantStepSize, Dopri5, LeapfrogMidpoint, ODETerm,
                      PIDController, SaveAt, diffeqsolve)
 from jax.experimental.mesh_utils import create_device_mesh
-from jax.experimental.multihost_utils import (process_allgather,
-                                              sync_global_devices)
+from jax.experimental.multihost_utils import (process_allgather)
 from jax.sharding import Mesh, NamedSharding
 from jax.sharding import PartitionSpec as P
 
 from jaxpm.kernels import interpolate_power_spectrum
 from jaxpm.painting import cic_paint_dx
-from jaxpm.pm import linear_field, lpt, make_ode_fn
+from jaxpm.pm import linear_field, lpt, make_diffrax_ode
 
 all_gather = partial(process_allgather, tiled=True)
 
@@ -86,7 +85,7 @@ def create_mesh_and_sharding(pdims):
 
 @partial(jax.jit, static_argnums=(2, 3, 4, 5, 6))
 def run_simulation(omega_c, sigma8, mesh_shape, box_size, halo_size,
-                   solver_choice,nb_snapshots, sharding):
+                   solver_choice, nb_snapshots, sharding):
     k = jnp.logspace(-4, 1, 128)
     pk = jc.power.linear_matter_power(
         jc.Planck15(Omega_c=omega_c, sigma8=sigma8), k)
@@ -106,15 +105,14 @@ def run_simulation(omega_c, sigma8, mesh_shape, box_size, halo_size,
                    halo_size=halo_size,
                    sharding=sharding)
 
-    ode_fn = make_ode_fn(mesh_shape, halo_size=halo_size, sharding=sharding)
-    term = ODETerm(
-        lambda t, state, args: jnp.stack(ode_fn(state, t, args), axis=0))
+    ode_fn = ODETerm(
+        make_diffrax_ode(cosmo, mesh_shape, paint_absolute_pos=False))
 
     # Choose solver
     solver = LeapfrogMidpoint() if solver_choice == "leapfrog" else Dopri5()
     stepsize_controller = ConstantStepSize(
     ) if solver_choice == "leapfrog" else PIDController(rtol=1e-5, atol=1e-5)
-    res = diffeqsolve(term,
+    res = diffeqsolve(ode_fn,
                       solver,
                       t0=0.1,
                       t1=1.,
@@ -150,7 +148,6 @@ def main():
         os.makedirs("fields", exist_ok=True)
         print(f"[{rank}] Simulation done")
         print(f"Solver stats: {solver_stats}")
-
 
     # Save initial conditions
     initial_conditions_g = all_gather(initial_conditions)
