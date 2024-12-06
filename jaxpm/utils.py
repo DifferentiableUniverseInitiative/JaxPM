@@ -5,7 +5,6 @@ import numpy as np
 from jax.scipy.stats import norm
 from scipy.special import legendre
 
-from jaxpm.growth import growth_factor, growth_rate
 
 __all__ = [
     'power_spectrum', 'transfer', 'coherence', 'pktranscoh',

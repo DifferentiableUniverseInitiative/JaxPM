@@ -1,5 +1,4 @@
 import jax.numpy as jnp
-import jax_cosmo as jc
 import numpy as np
 from jax.lib.xla_client import FftType
 from jax.sharding import PartitionSpec as P
