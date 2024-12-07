@@ -33,6 +33,15 @@
         "infra",
         "review"
       ]
+    },
+    {
+      "login": "hsimonfroy",
+      "name": "Hugo Simon-Onfroy",
+      "avatar_url": "https://avatars.githubusercontent.com/u/85559558?v=4",
+      "profile": "https://github.com/hsimonfroy",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
