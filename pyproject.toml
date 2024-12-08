@@ -16,6 +16,7 @@ dependencies = ["jax_cosmo", "jax>=0.4.30", "jaxdecomp>=0.2.1"]
 [project.optional-dependencies]
 test = [
     "jax>=0.4.30",
+    "numpy",
     "jax_cosmo",
     "jaxdecomp>=0.2.1",
     "pytest>=8.0.0",
