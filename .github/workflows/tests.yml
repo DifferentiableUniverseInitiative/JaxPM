@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  build:
+  run_tests:
 
     runs-on: ubuntu-latest
     strategy:
@@ -30,6 +30,7 @@ jobs:
         sudo apt-get install -y libopenmpi-dev
         python -m pip install --upgrade pip
         pip install jax==0.4.35
+        pip install numpy
         pip install git+https://github.com/MP-Gadget/pfft-python
         pip install git+https://github.com/MP-Gadget/pmesh
         pip install git+https://github.com/ASKabalan/fastpm-python
