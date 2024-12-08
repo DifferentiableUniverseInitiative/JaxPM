@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 import numpy as np
-from jax.lib.xla_client import FftType
+from jax.lax import FftType
 from jax.sharding import PartitionSpec as P
 from jaxdecomp import fftfreq3d, get_output_specs
 
