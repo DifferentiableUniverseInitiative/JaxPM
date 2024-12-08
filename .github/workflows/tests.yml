@@ -30,6 +30,9 @@ jobs:
         sudo apt-get install -y libopenmpi-dev
         python -m pip install --upgrade pip
         pip install jax==0.4.35
+        pip install git+https://github.com/MP-Gadget/pfft-python
+        pip install git+https://github.com/MP-Gadget/pmesh
+        pip install git+https://github.com/ASKabalan/fastpm-python
         pip install .[test]
 
     - name: Run Single Device Tests
