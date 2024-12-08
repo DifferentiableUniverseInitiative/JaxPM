@@ -5,8 +5,8 @@ initialize_distributed()  # ignore : E402
 import jax  # noqa : E402
 import jax.numpy as jnp  # noqa : E402
 import pytest  # noqa : E402
-from diffrax import (Dopri5, ODETerm, PIDController, SaveAt,  # noqa : E402
-                     diffeqsolve)
+from diffrax import SaveAt  # noqa : E402
+from diffrax import Dopri5, ODETerm, PIDController, diffeqsolve
 from helpers import MSE  # noqa : E402
 from jax import lax  # noqa : E402
 from jax.experimental.multihost_utils import process_allgather  # noqa : E402

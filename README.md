@@ -11,7 +11,7 @@ Provide a modern infrastructure to support differentiable PM N-body simulations 
 - Any order forward and backward automatic differentiation
 - Support automated batching using `vmap`
 - Compatibility with external optimizer libraries like `optax`
-- Now fully distributable on **multi-GPU and multi-node** systems using [jaxDecomp](https://github.com/DifferentiableUniverseInitiative/jaxDecomp) working with the latex `JAX v0.4.35`
+- Now fully distributable on **multi-GPU and multi-node** systems using [jaxDecomp](https://github.com/DifferentiableUniverseInitiative/jaxDecomp) working with`JAX v0.4.35`
 
 
 ## Open development and use
