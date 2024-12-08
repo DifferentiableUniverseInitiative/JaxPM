@@ -18,7 +18,7 @@ import numpy as np
 from diffrax import (ConstantStepSize, Dopri5, LeapfrogMidpoint, ODETerm,
                      PIDController, SaveAt, diffeqsolve)
 from jax.experimental.mesh_utils import create_device_mesh
-from jax.experimental.multihost_utils import (process_allgather)
+from jax.experimental.multihost_utils import process_allgather
 from jax.sharding import Mesh, NamedSharding
 from jax.sharding import PartitionSpec as P
 

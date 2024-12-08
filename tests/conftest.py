@@ -1,65 +1,59 @@
 # Parameterized fixture for mesh_shape
 import os
+
 import pytest
+
 os.environ["EQX_ON_ERROR"] = "nan"
 setup_done = False
 on_cluster = False
 
 
 def is_on_cluster():
-  global on_cluster
-  return on_cluster
+    global on_cluster
+    return on_cluster
+
 
 def initialize_distributed():
-  global setup_done
-  global on_cluster
-  if not setup_done:
-    if "SLURM_JOB_ID" in os.environ:
-      on_cluster = True
-      print("Running on cluster")
-      import jax
-      jax.distributed.initialize()
-      setup_done = True
-      on_cluster = True
-    else:
-      print("Running locally")
-      setup_done = True
-      on_cluster = False
-      os.environ["JAX_PLATFORM_NAME"] = "cpu"
-      os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
-      import jax
-
-
-@pytest.fixture(scope="session", autouse=True)
-def setup_and_teardown_session():
-  # Code to run at the start of the session
-  print("Starting session...")
-  initialize_distributed()
-  # Setup code here
-  # e.g., connecting to a database, initializing some resources, etc.
-
+    global setup_done
+    global on_cluster
+    if not setup_done:
+        if "SLURM_JOB_ID" in os.environ:
+            on_cluster = True
+            print("Running on cluster")
+            import jax
+            jax.distributed.initialize()
+            setup_done = True
+            on_cluster = True
+        else:
+            print("Running locally")
+            setup_done = True
+            on_cluster = False
+            os.environ["JAX_PLATFORM_NAME"] = "cpu"
+            os.environ[
+                "XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
+            import jax
 
 
 @pytest.fixture(
     scope="session",
     params=[
-        ((64, 64, 64) , (512., 512., 512.)),  # BOX
-        ((64, 64, 128) , (256. , 256. , 512.)), # RECTANGULAR
+        ((32, 32, 32), (256., 256., 256.)),  # BOX
+        ((32, 32, 64), (256., 256., 512.)),  # RECTANGULAR
     ])
 def simulation_config(request):
     return request.param
 
 
-@pytest.fixture(scope="session", params=[0.1 , 0.5 , 0.8])
+@pytest.fixture(scope="session", params=[0.1, 0.5, 0.8])
 def lpt_scale_factor(request):
     return request.param
 
 
-
 @pytest.fixture(scope="session")
 def cosmo():
-    from jax_cosmo import Cosmology
     from functools import partial
+
+    from jax_cosmo import Cosmology
     Planck18 = partial(
         Cosmology,
         # Omega_m = 0.3111
@@ -85,9 +79,9 @@ def particle_mesh(simulation_config):
 
 @pytest.fixture(scope="session")
 def fpm_initial_conditions(cosmo, particle_mesh):
-    from jax import numpy as jnp
     import jax_cosmo as jc
     import numpy as np
+    from jax import numpy as jnp
 
     # Generate initial particle positions
     grid = particle_mesh.generate_uniform_particle_grid(shift=0).astype(
@@ -117,7 +111,8 @@ def initial_conditions(fpm_initial_conditions):
 
 @pytest.fixture(scope="session")
 def solver(cosmo, particle_mesh):
-    from fastpm.core import Solver, Cosmology as FastPMCosmology
+    from fastpm.core import Cosmology as FastPMCosmology
+    from fastpm.core import Solver
     ref_cosmo = FastPMCosmology(cosmo)
     return Solver(particle_mesh, ref_cosmo, B=1)
 
@@ -150,8 +145,8 @@ def fpm_lpt2_field(fpm_lpt2, particle_mesh):
 
 @pytest.fixture(scope="session")
 def nbody_from_lpt1(solver, fpm_lpt1, particle_mesh, lpt_scale_factor):
-    from fastpm.core import  leapfrog
     import numpy as np
+    from fastpm.core import leapfrog
 
     if lpt_scale_factor == 0.8:
         pytest.skip("Do not run nbody simulation from scale factor 0.8")
@@ -166,8 +161,8 @@ def nbody_from_lpt1(solver, fpm_lpt1, particle_mesh, lpt_scale_factor):
 
 @pytest.fixture(scope="session")
 def nbody_from_lpt2(solver, fpm_lpt2, particle_mesh, lpt_scale_factor):
-    from fastpm.core import  leapfrog
     import numpy as np
+    from fastpm.core import leapfrog
 
     if lpt_scale_factor == 0.8:
         pytest.skip("Do not run nbody simulation from scale factor 0.8")

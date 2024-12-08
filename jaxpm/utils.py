@@ -5,7 +5,6 @@ import numpy as np
 from jax.scipy.stats import norm
 from scipy.special import legendre
 
-
 __all__ = [
     'power_spectrum', 'transfer', 'coherence', 'pktranscoh',
     'cross_correlation_coefficients', 'gaussian_smoothing'

@@ -25,12 +25,15 @@ def _chunk_split(ptcl_num, chunk_size, *arrays):
     return remainder, chunks
 
 
-def enmesh(base_indices, displacements, cell_size, base_shape, offset, new_cell_size, new_shape):
+def enmesh(base_indices, displacements, cell_size, base_shape, offset,
+           new_cell_size, new_shape):
     """Multilinear enmeshing."""
     base_indices = jnp.asarray(base_indices)
     displacements = jnp.asarray(displacements)
     with jax.experimental.enable_x64():
-        cell_size = jnp.float64(cell_size) if new_cell_size is not None else jnp.array(cell_size, dtype=displacements.dtype)
+        cell_size = jnp.float64(
+            cell_size) if new_cell_size is not None else jnp.array(
+                cell_size, dtype=displacements.dtype)
         if base_shape is not None:
             base_shape = jnp.array(base_shape, dtype=base_indices.dtype)
         offset = jnp.float64(offset)
@@ -40,12 +43,14 @@ def enmesh(base_indices, displacements, cell_size, base_shape, offset, new_cell_
             new_shape = jnp.array(new_shape, dtype=base_indices.dtype)
 
     spatial_dim = base_indices.shape[1]
-    neighbor_offsets = (jnp.arange(2**spatial_dim, dtype=base_indices.dtype)[:, jnp.newaxis] >>
-                        jnp.arange(spatial_dim, dtype=base_indices.dtype)) & 1
+    neighbor_offsets = (
+        jnp.arange(2**spatial_dim, dtype=base_indices.dtype)[:, jnp.newaxis] >>
+        jnp.arange(spatial_dim, dtype=base_indices.dtype)) & 1
 
     if new_cell_size is not None:
         particle_positions = base_indices * cell_size + displacements - offset
-        particle_positions = particle_positions[:, jnp.newaxis]  # insert neighbor axis
+        particle_positions = particle_positions[:, jnp.
+                                                newaxis]  # insert neighbor axis
         new_indices = particle_positions + neighbor_offsets * new_cell_size  # multilinear
 
         if base_shape is not None:
@@ -56,7 +61,9 @@ def enmesh(base_indices, displacements, cell_size, base_shape, offset, new_cell_
         new_displacements = particle_positions - new_indices * new_cell_size
 
         if base_shape is not None:
-            new_displacements -= jnp.rint(new_displacements / grid_length) * grid_length  # also abs(new_displacements) < new_cell_size is expected
+            new_displacements -= jnp.rint(
+                new_displacements / grid_length
+            ) * grid_length  # also abs(new_displacements) < new_cell_size is expected
 
         new_indices = new_indices.astype(base_indices.dtype)
         new_displacements = new_displacements.astype(displacements.dtype)
