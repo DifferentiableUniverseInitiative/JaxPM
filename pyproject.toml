@@ -10,17 +10,20 @@ authors = [{ name = "JaxPM developers" }]
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
-homepage = "https://github.com/DifferentiableUniverseInitiative/JaxPM"
-dependencies = ["jax_cosmo", "jax>=0.4.30", "jaxdecomp>=0.2.0"]
+urls = { "Homepage" = "https://github.com/DifferentiableUniverseInitiative/JaxPM" }
+dependencies = ["jax_cosmo", "jax>=0.4.30", "jaxdecomp>=0.2.1"]
 
 [project.optional-dependencies]
 test = [
+    "jax>=0.4.30",
     "jax_cosmo",
-    "jaxdecomp>=0.2.0",
+    "jaxdecomp>=0.2.1",
     "pytest>=8.0.0",
-    "jax[cpu]>=0.4.30",
     "pfft-python @ git+https://github.com/MP-Gadget/pfft-python",
-    "pmesh @ git+https://github.com/ASKabalan/pmesh",
+    "pmesh @ git+https://github.com/MP-Gadget/pmesh",
     "fastpm @ git+https://github.com/ASKabalan/fastpm-python",
     "diffrax"
 ]
+
+[tool.setuptools]
+packages = ["jaxpm"]
