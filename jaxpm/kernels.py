@@ -1,30 +1,46 @@
 import jax.numpy as jnp
 import numpy as np
+from jax.lax import FftType
+from jax.sharding import PartitionSpec as P
+from jaxdecomp import fftfreq3d, get_output_specs
+
+from jaxpm.distributed import autoshmap
 
 
-def fftk(shape, symmetric=True, finite=False, dtype=np.float32):
-    """ 
-    Return wave-vectors for a given shape
+def fftk(k_array):
     """
-    k = []
-    for d in range(len(shape)):
-        kd = np.fft.fftfreq(shape[d])
-        kd *= 2 * np.pi
-        kdshape = np.ones(len(shape), dtype='int')
-        if symmetric and d == len(shape) - 1:
-            kd = kd[:shape[d] // 2 + 1]
-        kdshape[d] = len(kd)
-        kd = kd.reshape(kdshape)
+    Generate Fourier transform wave numbers for a given mesh.
 
-        k.append(kd.astype(dtype))
-    del kd, kdshape
-    return k
+    Args:
+        nc (int): Shape of the mesh grid.
+
+    Returns:
+        list: List of wave number arrays for each dimension in
+        the order [kx, ky, kz].
+    """
+    kx, ky, kz = fftfreq3d(k_array)
+    # to the order of dimensions in the transposed FFT
+    return kx, ky, kz
+
+
+def interpolate_power_spectrum(input, k, pk, sharding=None):
+
+    pk_fn = lambda x: jnp.interp(x.reshape(-1), k, pk).reshape(x.shape)
+
+    gpu_mesh = sharding.mesh if sharding is not None else None
+    specs = sharding.spec if sharding is not None else P()
+    out_specs = P(*get_output_specs(
+        FftType.FFT, specs, mesh=gpu_mesh)) if gpu_mesh is not None else P()
+
+    return autoshmap(pk_fn,
+                     gpu_mesh=gpu_mesh,
+                     in_specs=out_specs,
+                     out_specs=out_specs)(input)
 
 
 def gradient_kernel(kvec, direction, order=1):
     """
     Computes the gradient kernel in the requested direction
-    
     Parameters
     -----------
     kvec: list
@@ -50,23 +66,30 @@ def gradient_kernel(kvec, direction, order=1):
         return wts
 
 
-def invlaplace_kernel(kvec):
+def invlaplace_kernel(kvec, fd=False):
     """
-    Compute the inverse Laplace kernel
+    Compute the inverse Laplace kernel.
+
+    cf. [Feng+2016](https://arxiv.org/pdf/1603.00476)
 
     Parameters
     -----------
     kvec: list
         List of wave-vectors
+    fd: bool
+        Finite difference kernel
 
     Returns
     --------
     wts: array
         Complex kernel values
     """
-    kk = sum(ki**2 for ki in kvec)
-    kk_nozeros = jnp.where(kk==0, 1, kk) 
-    return - jnp.where(kk==0, 0, 1 / kk_nozeros)
+    if fd:
+        kk = sum((ki * jnp.sinc(ki / (2 * jnp.pi)))**2 for ki in kvec)
+    else:
+        kk = sum(ki**2 for ki in kvec)
+    kk_nozeros = jnp.where(kk == 0, 1, kk)
+    return -jnp.where(kk == 0, 0, 1 / kk_nozeros)
 
 
 def longrange_kernel(kvec, r_split):
@@ -79,12 +102,10 @@ def longrange_kernel(kvec, r_split):
         List of wave-vectors
     r_split: float
         Splitting radius
-        
     Returns
     --------
     wts: array
         Complex kernel values
-    
     TODO: @modichirag add documentation
     """
     if r_split != 0:
@@ -105,13 +126,12 @@ def cic_compensation(kvec):
     -----------
     kvec: list
         List of wave-vectors
-        
     Returns:
     --------
     wts: array
         Complex kernel values
     """
-    kwts = [np.sinc(kvec[i] / (2 * np.pi)) for i in range(3)]
+    kwts = [jnp.sinc(kvec[i] / (2 * np.pi)) for i in range(3)]
     wts = (kwts[0] * kwts[1] * kwts[2])**(-2)
     return wts
 
