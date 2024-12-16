@@ -9,14 +9,14 @@ from diffrax._custom_types import Args, BoolScalarLike, DenseInfo, RealScalarLik
 from diffrax import LocalLinearInterpolation, RESULTS, AbstractTerm, AbstractSolver
 from .ode import LeapFrogODETerm
 import jax_cosmo as jc
-
+from jax import lax
 
 _ErrorEstimate: TypeAlias = None
-_SolverState: TypeAlias = None
 
 Ya: TypeAlias = PyTree[Float[ArrayLike, "y"]]
 Yb: TypeAlias = PyTree[Float[ArrayLike, "y"]]
 
+_SolverState: TypeAlias = tuple[Ya, Yb]
 
 class EfficientLeapFrog(AbstractSolver):
     """Semi-implicit Euler's method.
@@ -24,7 +24,7 @@ class EfficientLeapFrog(AbstractSolver):
     Symplectic method. Does not support adaptive step sizing. Uses 1st order local
     linear interpolation for dense/ts output.
     """
-
+    initial_t0 : RealScalarLike
     final_t1: RealScalarLike
     cosmo: jc.Cosmology  # Declares cosmology object as a data member
     term_structure: ClassVar = (AbstractTerm, AbstractTerm)
@@ -43,22 +43,6 @@ class EfficientLeapFrog(AbstractSolver):
         y0: tuple[Ya, Yb],
         args: Args,
     ) -> _SolverState:
-        term_1, term_2 = terms
-        assert isinstance(term_1, LeapFrogODETerm)
-        assert isinstance(term_2, LeapFrogODETerm)
-        return None
-
-    def initial_kick(
-        self,
-        terms: tuple[LeapFrogODETerm, LeapFrogODETerm],
-        t0: RealScalarLike,
-        t1: RealScalarLike,
-        y0: tuple[Ya, Yb],
-        args: Args,
-    ) -> tuple[tuple[Ya, Yb], RESULTS]:
-        """
-        Perform the initial kick operation before the integration loop starts.
-        """
         term_1, _ = terms
         y0_1, y0_2 = y0
 
@@ -67,6 +51,7 @@ class EfficientLeapFrog(AbstractSolver):
         y1_2 = (y0_2**ω + term_1.vf_prod(t0, y0_1, args, control) ** ω).ω
 
         return (y0_1, y1_2)
+
 
     def step(
         self,
@@ -78,10 +63,10 @@ class EfficientLeapFrog(AbstractSolver):
         solver_state: _SolverState,
         made_jump: BoolScalarLike,
     ) -> tuple[tuple[Ya, Yb], _ErrorEstimate, DenseInfo, _SolverState, RESULTS]:
-        del made_jump, solver_state
+        del made_jump
 
         term_1, term_2 = terms
-        y0_1, y0_2 = y0
+        y0_1, y0_2 = lax.cond(t0 == self.initial_t0, lambda _ : solver_state , lambda _ : y0, None)
         t0t1 = (t0 * t1) ** 0.5
 
         # Drift
@@ -96,7 +81,7 @@ class EfficientLeapFrog(AbstractSolver):
 
         y1 = (y1_1, y1_2)
         dense_info = dict(y0=y0, y1=y1)
-        return y1, None, dense_info, None, RESULTS.successful
+        return y1, None, dense_info, solver_state, RESULTS.successful
 
     def func(
         self,
