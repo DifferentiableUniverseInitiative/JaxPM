@@ -37,12 +37,15 @@ class EfficientLeapFrog(AbstractSolver):
 
     def init(
         self,
-        terms: tuple[AbstractTerm, AbstractTerm],
+        terms: tuple[LeapFrogODETerm, LeapFrogODETerm],
         t0: RealScalarLike,
         t1: RealScalarLike,
         y0: tuple[Ya, Yb],
         args: Args,
     ) -> _SolverState:
+        term_1, term_2 = terms
+        assert isinstance(term_1, LeapFrogODETerm)
+        assert isinstance(term_2, LeapFrogODETerm)
         return None
 
     def initial_kick(
