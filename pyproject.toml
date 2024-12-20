@@ -30,4 +30,4 @@ test = [
 packages = ["jaxpm"]
 
 [tool.setuptools_scm]
-version_file = "mmoma/_version.py"
+version_file = "jaxpm/_version.py"
