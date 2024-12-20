@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools", "wheel", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "JaxPM"
-version = "0.0.1"
+dynamic = ["version"]
 description = "A dead simple FastPM implementation in JAX"
 authors = [{ name = "JaxPM developers" }]
 readme = "README.md"
@@ -28,3 +28,6 @@ test = [
 
 [tool.setuptools]
 packages = ["jaxpm"]
+
+[tool.setuptools_scm]
+version_file = "mmoma/_version.py"
