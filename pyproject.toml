@@ -31,4 +31,3 @@ packages = ["jaxpm"]
 
 [tool.setuptools_scm]
 version_file = "jaxpm/_version.py"
-
