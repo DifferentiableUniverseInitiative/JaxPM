@@ -98,6 +98,11 @@ __pypackages__/
 celerybeat-schedule
 celerybeat.pid
 
+
+out
+traces
+*.npy
+*.out
 # SageMath parsed files
 *.sage.py
 

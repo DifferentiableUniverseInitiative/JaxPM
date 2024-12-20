@@ -1,0 +1,45 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  run_tests:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10" , "3.11" , "3.12"]
+
+    steps:
+    - name: Checkout Source
+      uses: actions/checkout@v2.3.1
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get install -y libopenmpi-dev
+        python -m pip install --upgrade pip
+        pip install jax==0.4.35
+        pip install numpy setuptools cython wheel
+        pip install git+https://github.com/MP-Gadget/pfft-python
+        pip install git+https://github.com/MP-Gadget/pmesh
+        pip install git+https://github.com/ASKabalan/fastpm-python --no-build-isolation
+        pip install .[test]
+
+    - name: Run Single Device Tests
+      run: |
+        cd tests
+        pytest -v -m "not distributed"
+    - name: Run Distributed tests
+      run: |
+        pytest -v -m distributed
