@@ -34,7 +34,8 @@ jobs:
         pip install git+https://github.com/MP-Gadget/pfft-python
         pip install git+https://github.com/MP-Gadget/pmesh
         pip install git+https://github.com/ASKabalan/fastpm-python --no-build-isolation
-        pip install .[test]
+        pip install -r requirements-test.txt
+        pip install .
 
     - name: Run Single Device Tests
       run: |
