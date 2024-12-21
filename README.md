@@ -4,6 +4,15 @@
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 JAX-powered Cosmological Particle-Mesh N-body Solver
 
+## Install
+
+Basic installation can be done using pip:
+```bash
+pip install jaxpm
+```
+For more advanced installation for optimized distribution on gpu clusters, please install jaxDecomp first. See instructions [here](https://github.com/DifferentiableUniverseInitiative/jaxDecomp).
+
+
 ## Goals
 
 Provide a modern infrastructure to support differentiable PM N-body simulations using JAX:
