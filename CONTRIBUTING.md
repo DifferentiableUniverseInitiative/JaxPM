@@ -41,7 +41,7 @@ To set up the development environment, follow these steps:
 To run the tests, use the following command:
 
 ```sh
-pytest
+python -m pytest
 ```
 
 Make sure all tests pass before submitting your changes.
