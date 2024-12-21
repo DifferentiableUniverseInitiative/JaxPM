@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "JaxPM"
 dynamic = ["version"]
-description = "A dead simple FastPM implementation in JAX"
+description = "A simple Particle-Mesh implementation in JAX"
 authors = [{ name = "JaxPM developers" }]
 readme = "README.md"
 requires-python = ">=3.9"
