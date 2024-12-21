@@ -5,6 +5,13 @@
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 JAX-powered Cosmological Particle-Mesh N-body Solver
 
+> ### Note
+> **The new JaxPM v0.1.xx** supports multi-GPU model distribution while remaining compatible with previous releases. These significant changes are still under development and testing, so please report any issues you encounter.
+> For the older version but more stable version, install:
+> ```bash
+> pip install jaxpm==0.0.2
+> ```
+
 ## Install
 
 Basic installation can be done using pip:
