@@ -28,8 +28,8 @@ def _chunk_split(ptcl_num, chunk_size, *arrays):
 def enmesh(base_indices, displacements, cell_size, base_shape, offset,
            new_cell_size, new_shape):
     """Multilinear enmeshing."""
-    base_indices = jnp.asarray(base_indices)
-    displacements = jnp.asarray(displacements)
+    base_indices = jax.tree.map(jnp.asarray , base_indices)
+    displacements = jax.tree.map(jnp.asarray , displacements)
     with jax.experimental.enable_x64():
         cell_size = jnp.float64(
             cell_size) if new_cell_size is not None else jnp.array(
@@ -61,7 +61,7 @@ def enmesh(base_indices, displacements, cell_size, base_shape, offset,
         new_displacements = particle_positions - new_indices * new_cell_size
 
         if base_shape is not None:
-            new_displacements -= jnp.rint(
+            new_displacements -= jax.tree.map(jnp.rint ,
                 new_displacements / grid_length
             ) * grid_length  # also abs(new_displacements) < new_cell_size is expected
 
@@ -89,7 +89,7 @@ def enmesh(base_indices, displacements, cell_size, base_shape, offset,
         if base_shape is not None:
             new_indices %= base_shape
 
-    weights = 1 - jnp.abs(new_displacements)
+    weights = 1 - jax.tree.map(jnp.abs , new_displacements)
 
     if base_shape is None and new_shape is not None:  # all new_indices >= 0 if base_shape is not None
         new_indices = jnp.where(new_indices < 0, new_shape, new_indices)
@@ -109,8 +109,11 @@ def _scatter_chunk(carry, chunk):
     ind, frac = enmesh(pmid, disp, cell_size, mesh_shape, offset, cell_size,
                        spatial_shape)
     # scatter
-    ind = tuple(ind[..., i] for i in range(spatial_ndim))
-    mesh = mesh.at[ind].add(jnp.multiply(jnp.expand_dims(val, axis=-1), frac))
+    ind = jax.tree.map(lambda x : tuple(x[..., i] for i in range(spatial_ndim)) , ind)
+    mesh_structure = jax.tree_structure(mesh)
+    val_flat = jax.tree.leaves(val)
+    val_tree = jax.tree_unflatten(mesh_structure, val_flat)
+    mesh = jax.tree.map(lambda m , v , i, f : m.at[i].add(jnp.multiply(jnp.expand_dims(v, axis=-1), f)) , mesh , val_tree ,ind ,  frac)
     carry = mesh, offset, cell_size, mesh_shape
     return carry, None
 
@@ -122,9 +125,10 @@ def scatter(pmid,
             val=1.,
             offset=0,
             cell_size=1.):
+    
     ptcl_num, spatial_ndim = pmid.shape
-    val = jnp.asarray(val)
-    mesh = jnp.asarray(mesh)
+    val = jax.tree.map(jnp.asarray , val)
+    mesh = jax.tree.map(jnp.asarray , mesh)
     remainder, chunks = _chunk_split(ptcl_num, chunk_size, pmid, disp, val)
     carry = mesh, offset, cell_size, mesh.shape
     if remainder is not None:
@@ -147,9 +151,9 @@ def _chunk_cat(remainder_array, chunked_array):
 def gather(pmid, disp, mesh, chunk_size=2**24, val=0, offset=0, cell_size=1.):
     ptcl_num, spatial_ndim = pmid.shape
 
-    mesh = jnp.asarray(mesh)
+    mesh = jax.tree.map(jnp.asarray , mesh)
 
-    val = jnp.asarray(val)
+    val = jax.tree.map(jnp.asarray , val)
 
     if mesh.shape[spatial_ndim:] != val.shape[1:]:
         raise ValueError('channel shape mismatch: '
@@ -183,8 +187,11 @@ def _gather_chunk(carry, chunk):
                        spatial_shape)
 
     # gather
-    ind = tuple(ind[..., i] for i in range(spatial_ndim))
-    frac = jnp.expand_dims(frac, chan_axis)
-    val += (mesh.at[ind].get(mode='drop', fill_value=0) * frac).sum(axis=1)
+    ind = jax.tree.map(lambda x : tuple(x[..., i] for i in range(spatial_ndim)) , ind)
+    frac = jax.tree.map(lambda x: jnp.expand_dims(x, chan_axis), frac)
+    ind_structure = jax.tree_structure(ind)
+    frac_structure = jax.tree_structure(frac)
+    mesh_structure = jax.tree_structure(mesh)
+    val += jax.tree.map(lambda m , i , f : (m.at[i].get(mode='drop', fill_value=0) * f).sum(axis=1) , mesh , ind , frac)
 
     return carry, val
