@@ -3,7 +3,6 @@ import os
 #os.environ["JAX_PLATFORM_NAME"] = "cpu"
 #os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
 
-
 os.environ["EQX_ON_ERROR"] = "nan"
 from functools import partial
 
@@ -24,7 +23,6 @@ from jaxpm.painting import cic_paint, cic_paint_dx, cic_read, cic_read_dx
 from jaxpm.pm import linear_field, lpt, make_diffrax_ode
 
 #assert jax.device_count() >= 8, "This notebook requires a TPU or GPU runtime with 8 devices"
-
 
 all_gather = partial(process_allgather, tiled=False)
 
