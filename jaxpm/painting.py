@@ -48,7 +48,7 @@ def _cic_paint_impl(grid_mesh, positions, weight=None):
 @partial(jax.jit, static_argnums=(3, 4))
 def cic_paint(grid_mesh, positions, weight=None, halo_size=0, sharding=None):
 
-    positions_structure = jax.tree_structure(positions)
+    positions_structure = jax.tree.structure(positions)
     grid_mesh = jax.tree.unflatten(positions_structure, jax.tree.leaves(grid_mesh))
     positions = positions.reshape((*grid_mesh.shape, 3))
 
@@ -171,7 +171,7 @@ def _cic_paint_dx_impl(displacements, halo_size, weight=1., chunk_size=2**24):
                                                     indexing='ij') , axis=0), particle_mesh)
     
     particle_mesh = jax.tree.map(lambda x : jnp.pad(x, halo_size), particle_mesh)
-    pmid = jax.tree_map(lambda a, b, c : jnp.stack([a + halo_x, b + halo_y, c], axis=-1), a, b, c)
+    pmid = jax.tree.map(lambda a, b, c : jnp.stack([a + halo_x, b + halo_y, c], axis=-1), a, b, c)
     return scatter(pmid.reshape([-1, 3]),
                    displacements.reshape([-1, 3]),
                    particle_mesh,
@@ -222,7 +222,7 @@ def _cic_read_dx_impl(grid_mesh, disp, halo_size):
                                                     jnp.arange(original_shape[2]),
                                                     indexing='ij') , axis=0), grid_mesh)
 
-    pmid = jax.tree_map(lambda a, b, c : jnp.stack([a + halo_x, b + halo_y, c], axis=-1), a, b, c)
+    pmid = jax.tree.map(lambda a, b, c : jnp.stack([a + halo_x, b + halo_y, c], axis=-1), a, b, c)
     pmid = pmid.reshape([-1, 3])
     disp = disp.reshape([-1, 3])
 

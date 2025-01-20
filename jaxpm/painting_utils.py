@@ -110,9 +110,9 @@ def _scatter_chunk(carry, chunk):
                        spatial_shape)
     # scatter
     ind = jax.tree.map(lambda x : tuple(x[..., i] for i in range(spatial_ndim)) , ind)
-    mesh_structure = jax.tree_structure(mesh)
+    mesh_structure = jax.tree.structure(mesh)
     val_flat = jax.tree.leaves(val)
-    val_tree = jax.tree_unflatten(mesh_structure, val_flat)
+    val_tree = jax.tree.unflatten(mesh_structure, val_flat)
     mesh = jax.tree.map(lambda m , v , i, f : m.at[i].add(jnp.multiply(jnp.expand_dims(v, axis=-1), f)) , mesh , val_tree ,ind ,  frac)
     carry = mesh, offset, cell_size, mesh_shape
     return carry, None
@@ -189,9 +189,9 @@ def _gather_chunk(carry, chunk):
     # gather
     ind = jax.tree.map(lambda x : tuple(x[..., i] for i in range(spatial_ndim)) , ind)
     frac = jax.tree.map(lambda x: jnp.expand_dims(x, chan_axis), frac)
-    ind_structure = jax.tree_structure(ind)
-    frac_structure = jax.tree_structure(frac)
-    mesh_structure = jax.tree_structure(mesh)
+    ind_structure = jax.tree.structure(ind)
+    frac_structure = jax.tree.structure(frac)
+    mesh_structure = jax.tree.structure(mesh)
     val += jax.tree.map(lambda m , i , f : (m.at[i].get(mode='drop', fill_value=0) * f).sum(axis=1) , mesh , ind , frac)
 
     return carry, val
