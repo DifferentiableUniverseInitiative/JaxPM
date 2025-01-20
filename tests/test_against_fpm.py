@@ -1,14 +1,15 @@
+import jax
 import pytest
 from diffrax import Dopri5, ODETerm, PIDController, SaveAt, diffeqsolve
 from helpers import MSE, MSRE
 from jax import numpy as jnp
-
 from jaxdecomp import ShardedArray
+
 from jaxpm.distributed import uniform_particles
 from jaxpm.painting import cic_paint, cic_paint_dx
 from jaxpm.pm import lpt, make_diffrax_ode
 from jaxpm.utils import power_spectrum
-import jax 
+
 _TOLERANCE = 1e-4
 _PM_TOLERANCE = 1e-3
 
@@ -17,7 +18,8 @@ _PM_TOLERANCE = 1e-3
 @pytest.mark.parametrize("order", [1, 2])
 @pytest.mark.parametrize("shardedArrayAPI", [True, False])
 def test_lpt_absolute(simulation_config, initial_conditions, lpt_scale_factor,
-                      fpm_lpt1_field, fpm_lpt2_field, cosmo, order , shardedArrayAPI):
+                      fpm_lpt1_field, fpm_lpt2_field, cosmo, order,
+                      shardedArrayAPI):
 
     mesh_shape, box_shape = simulation_config
     cosmo._workspace = {}
@@ -53,7 +55,8 @@ def test_lpt_absolute(simulation_config, initial_conditions, lpt_scale_factor,
 @pytest.mark.parametrize("order", [1, 2])
 @pytest.mark.parametrize("shardedArrayAPI", [True, False])
 def test_lpt_relative(simulation_config, initial_conditions, lpt_scale_factor,
-                      fpm_lpt1_field, fpm_lpt2_field, cosmo, order , shardedArrayAPI):
+                      fpm_lpt1_field, fpm_lpt2_field, cosmo, order,
+                      shardedArrayAPI):
 
     mesh_shape, box_shape = simulation_config
     cosmo._workspace = {}
@@ -77,12 +80,13 @@ def test_lpt_relative(simulation_config, initial_conditions, lpt_scale_factor,
         assert type(dx) == ShardedArray
         assert type(lpt_field) == ShardedArray
 
+
 @pytest.mark.single_device
 @pytest.mark.parametrize("order", [1, 2])
 @pytest.mark.parametrize("shardedArrayAPI", [True, False])
 def test_nbody_absolute(simulation_config, initial_conditions,
                         lpt_scale_factor, nbody_from_lpt1, nbody_from_lpt2,
-                        cosmo, order , shardedArrayAPI):
+                        cosmo, order, shardedArrayAPI):
 
     mesh_shape, box_shape = simulation_config
     cosmo._workspace = {}
@@ -110,7 +114,8 @@ def test_nbody_absolute(simulation_config, initial_conditions,
 
     saveat = SaveAt(t1=True)
 
-    y0 = jax.tree.map(lambda particles , dx , p : jnp.stack([particles + dx, p]), particles ,  dx, p)
+    y0 = jax.tree.map(lambda particles, dx, p: jnp.stack([particles + dx, p]),
+                      particles, dx, p)
 
     solutions = diffeqsolve(ode_fn,
                             solver,
@@ -135,7 +140,7 @@ def test_nbody_absolute(simulation_config, initial_conditions,
 
     if shardedArrayAPI:
         assert type(dx) == ShardedArray
-        assert type( solutions.ys[-1, 0]) == ShardedArray
+        assert type(solutions.ys[-1, 0]) == ShardedArray
         assert type(final_field) == ShardedArray
 
 
@@ -144,7 +149,7 @@ def test_nbody_absolute(simulation_config, initial_conditions,
 @pytest.mark.parametrize("shardedArrayAPI", [True, False])
 def test_nbody_relative(simulation_config, initial_conditions,
                         lpt_scale_factor, nbody_from_lpt1, nbody_from_lpt2,
-                        cosmo, order , shardedArrayAPI):
+                        cosmo, order, shardedArrayAPI):
 
     mesh_shape, box_shape = simulation_config
     cosmo._workspace = {}
@@ -155,8 +160,7 @@ def test_nbody_relative(simulation_config, initial_conditions,
     # Initial displacement
     dx, p, _ = lpt(cosmo, initial_conditions, a=lpt_scale_factor, order=order)
 
-    ode_fn = ODETerm(
-        make_diffrax_ode(mesh_shape, paint_absolute_pos=False))
+    ode_fn = ODETerm(make_diffrax_ode(mesh_shape, paint_absolute_pos=False))
 
     solver = Dopri5()
     controller = PIDController(rtol=1e-9,
@@ -167,7 +171,7 @@ def test_nbody_relative(simulation_config, initial_conditions,
 
     saveat = SaveAt(t1=True)
 
-    y0 = jax.tree.map(lambda dx , p : jnp.stack([dx, p]), dx, p)
+    y0 = jax.tree.map(lambda dx, p: jnp.stack([dx, p]), dx, p)
 
     solutions = diffeqsolve(ode_fn,
                             solver,
@@ -192,5 +196,5 @@ def test_nbody_relative(simulation_config, initial_conditions,
 
     if shardedArrayAPI:
         assert type(dx) == ShardedArray
-        assert type( solutions.ys[-1, 0]) == ShardedArray
+        assert type(solutions.ys[-1, 0]) == ShardedArray
         assert type(final_field) == ShardedArray

@@ -1,9 +1,10 @@
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.lax import FftType
 from jax.sharding import PartitionSpec as P
 from jaxdecomp import fftfreq3d, get_output_specs
-import jax
+
 from jaxpm.distributed import autoshmap
 
 
@@ -25,7 +26,8 @@ def fftk(k_array):
 def interpolate_power_spectrum(input, k, pk, sharding=None):
 
     def pk_fn(input):
-        return jax.tree.map(lambda x: jnp.interp(x.reshape(-1), k, pk).reshape(x.shape), input)
+        return jax.tree.map(
+            lambda x: jnp.interp(x.reshape(-1), k, pk).reshape(x.shape), input)
 
     gpu_mesh = sharding.mesh if sharding is not None else None
     specs = sharding.spec if sharding is not None else P()
@@ -61,7 +63,8 @@ def gradient_kernel(kvec, direction, order=1):
         return wts
     else:
         w = kvec[direction]
-        a = jax.tree.map(lambda x: 1 / 6.0 * (8 * jnp.sin(x) - jnp.sin(2 * x)), w)
+        a = jax.tree.map(lambda x: 1 / 6.0 * (8 * jnp.sin(x) - jnp.sin(2 * x)),
+                         w)
         wts = a * 1j
         return wts
 
@@ -85,11 +88,14 @@ def invlaplace_kernel(kvec, fd=False):
         Complex kernel values
     """
     if fd:
-        kk = sum(jax.tree.map(lambda x: (x * jnp.sinc(x / (2 * jnp.pi)))**2, ki) for ki in kvec)
+        kk = sum(
+            jax.tree.map(lambda x: (x * jnp.sinc(x / (2 * jnp.pi)))**2, ki)
+            for ki in kvec)
     else:
         kk = sum(jax.tree.map(lambda x: x**2, ki) for ki in kvec)
     kk_nozeros = jax.tree.map(lambda x: jnp.where(x == 0, 1, x), kk)
-    return jax.tree.map(lambda x , y : -jnp.where(y == 0, 0, 1 / x), kk_nozeros, kk)
+    return jax.tree.map(lambda x, y: -jnp.where(y == 0, 0, 1 / x), kk_nozeros,
+                        kk)
 
 
 def longrange_kernel(kvec, r_split):
@@ -131,7 +137,10 @@ def cic_compensation(kvec):
     wts: array
         Complex kernel values
     """
-    kwts = [jax.tree.map(lambda x: jnp.sinc(x / (2 * np.pi)), kvec[i]) for i in range(3)]
+    kwts = [
+        jax.tree.map(lambda x: jnp.sinc(x / (2 * np.pi)), kvec[i])
+        for i in range(3)
+    ]
     wts = (kwts[0] * kwts[1] * kwts[2])**(-2)
     return wts
 

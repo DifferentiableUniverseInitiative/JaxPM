@@ -1,15 +1,16 @@
 from functools import partial
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.scipy.stats import norm
 from scipy.special import legendre
-import jax
 
 __all__ = [
     'power_spectrum', 'transfer', 'coherence', 'pktranscoh',
     'cross_correlation_coefficients', 'gaussian_smoothing'
 ]
+
 
 def _initialize_pk(mesh_shape, box_shape, kedges, los):
     """
@@ -100,11 +101,12 @@ def power_spectrum(mesh,
     n_bins = len(kavg) + 2
 
     # FFTs
-    meshk = jax.tree.map(lambda x : jnp.fft.fftn(x, norm='ortho') , mesh)
+    meshk = jax.tree.map(lambda x: jnp.fft.fftn(x, norm='ortho'), mesh)
     if mesh2 is None:
         mmk = meshk.real**2 + meshk.imag**2
     else:
-        mmk = meshk * jax.tree.map(lambda x : jnp.fft.fftn(x, norm='ortho').conj() , mesh2)
+        mmk = meshk * jax.tree.map(
+            lambda x: jnp.fft.fftn(x, norm='ortho').conj(), mesh2)
 
     # Sum powers
     pk = jnp.empty((len(poles), n_bins))

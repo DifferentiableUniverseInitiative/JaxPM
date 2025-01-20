@@ -79,6 +79,7 @@ def slice_unpad_impl(x, pad_width):
 
     return x[tuple(unpad_slice)]
 
+
 def slice_pad_impl(x, pad_width):
     return jax.tree.map(lambda x: jnp.pad(x, pad_width), x)
 

@@ -19,28 +19,36 @@ def _cic_paint_impl(grid_mesh, positions, weight=None):
     """
 
     positions = positions.reshape([-1, 3])
-    positions = jax.tree.map(lambda p : jnp.expand_dims(p , 1) , positions)
-    floor = jax.tree.map(jnp.floor , positions)
+    positions = jax.tree.map(lambda p: jnp.expand_dims(p, 1), positions)
+    floor = jax.tree.map(jnp.floor, positions)
     connection = jnp.array([[[0, 0, 0], [1., 0, 0], [0., 1, 0], [0., 0, 1],
                              [1., 1, 0], [1., 0, 1], [0., 1, 1], [1., 1, 1]]])
 
     neighboor_coords = floor + connection
-    kernel = 1. - jax.tree.map(jnp.abs , (positions - neighboor_coords))
+    kernel = 1. - jax.tree.map(jnp.abs, (positions - neighboor_coords))
     kernel = kernel[..., 0] * kernel[..., 1] * kernel[..., 2]
     if weight is not None:
         if jax.tree.all(jax.tree.map(jnp.isscalar, weight)):
-            kernel = jax.tree.map(lambda k , w : jnp.multiply(jnp.expand_dims(w, axis=-1)
-            , k) , kernel , weight)
+            kernel = jax.tree.map(
+                lambda k, w: jnp.multiply(jnp.expand_dims(w, axis=-1), k),
+                kernel, weight)
         else:
-            kernel = jax.tree.map(lambda k , w : jnp.multiply(w.reshape(*positions.shape[:-1]) , k) , kernel , weight)
+            kernel = jax.tree.map(
+                lambda k, w: jnp.multiply(w.reshape(*positions.shape[:-1]), k),
+                kernel, weight)
 
-    neighboor_coords = jax.tree.map(lambda nc : jnp.mod(nc.reshape([-1, 8, 3]).astype('int32'), jnp.array(grid_mesh.shape)) , neighboor_coords)
+    neighboor_coords = jax.tree.map(
+        lambda nc: jnp.mod(
+            nc.reshape([-1, 8, 3]).astype('int32'), jnp.array(grid_mesh.shape)
+        ), neighboor_coords)
 
     dnums = jax.lax.ScatterDimensionNumbers(update_window_dims=(),
                                             inserted_window_dims=(0, 1, 2),
                                             scatter_dims_to_operand_dims=(0, 1,
                                                                           2))
-    mesh = jax.tree.map(lambda g , nc , k : lax.scatter_add(g, nc, k.reshape([-1, 8]), dnums) , grid_mesh , neighboor_coords , kernel)                                                                
+    mesh = jax.tree.map(
+        lambda g, nc, k: lax.scatter_add(g, nc, k.reshape([-1, 8]), dnums),
+        grid_mesh, neighboor_coords, kernel)
 
     return mesh
 
@@ -49,7 +57,8 @@ def _cic_paint_impl(grid_mesh, positions, weight=None):
 def cic_paint(grid_mesh, positions, weight=None, halo_size=0, sharding=None):
 
     positions_structure = jax.tree.structure(positions)
-    grid_mesh = jax.tree.unflatten(positions_structure, jax.tree.leaves(grid_mesh))
+    grid_mesh = jax.tree.unflatten(positions_structure,
+                                   jax.tree.leaves(grid_mesh))
     positions = positions.reshape((*grid_mesh.shape, 3))
 
     halo_size, halo_extents = get_halo_size(halo_size, sharding)
@@ -79,24 +88,27 @@ def _cic_read_impl(grid_mesh, positions):
     # Reshape positions to a flat list of 3D coordinates
     positions = positions.reshape([-1, 3])
     # Expand dimensions to calculate neighbor coordinates
-    positions = jax.tree.map(lambda p : jnp.expand_dims(p, 1) , positions)
+    positions = jax.tree.map(lambda p: jnp.expand_dims(p, 1), positions)
     # Floor the positions to get the base grid cell for each particle
-    floor = jax.tree.map(jnp.floor , positions)
+    floor = jax.tree.map(jnp.floor, positions)
     # Define connections to calculate all neighbor coordinates
     connection = jnp.array([[[0, 0, 0], [1., 0, 0], [0., 1, 0], [0., 0, 1],
                              [1., 1, 0], [1., 0, 1], [0., 1, 1], [1., 1, 1]]])
     # Calculate the 8 neighboring coordinates
     neighboor_coords = floor + connection
     # Calculate kernel weights based on distance from each neighboring coordinate
-    kernel = 1. - jax.tree.map(jnp.abs , positions - neighboor_coords)
+    kernel = 1. - jax.tree.map(jnp.abs, positions - neighboor_coords)
     kernel = kernel[..., 0] * kernel[..., 1] * kernel[..., 2]
     # Modulo operation to wrap around edges if necessary
-    neighboor_coords = jax.tree.map(lambda nc : jnp.mod(nc.astype('int32')
-    ,jnp.array(grid_mesh.shape)) , neighboor_coords)
+    neighboor_coords = jax.tree.map(
+        lambda nc: jnp.mod(nc.astype('int32'), jnp.array(grid_mesh.shape)),
+        neighboor_coords)
 
     # Ensure grid_mesh shape is as expected
     # Retrieve values from grid_mesh at each neighboring coordinate and multiply by kernel
-    grid_mesh = jax.tree.map(lambda g , nc , k : g[nc[...,0], nc[...,1], nc[...,2]] * k , grid_mesh , neighboor_coords , kernel)
+    grid_mesh = jax.tree.map(
+        lambda g, nc, k: g[nc[..., 0], nc[..., 1], nc[..., 2]] * k, grid_mesh,
+        neighboor_coords, kernel)
     return grid_mesh.sum(axis=-1).reshape(original_shape[:-1]) # yapf: disable
 
 
@@ -157,7 +169,9 @@ def _cic_paint_dx_impl(displacements, halo_size, weight=1., chunk_size=2**24):
     halo_y, _ = halo_size[1]
 
     original_shape = displacements.shape
-    particle_mesh = jax.tree.map(lambda x : jnp.zeros(x.shape[:-1], dtype=displacements.dtype), displacements)
+    particle_mesh = jax.tree.map(
+        lambda x: jnp.zeros(x.shape[:-1], dtype=displacements.dtype),
+        displacements)
     if not jnp.isscalar(weight):
         if weight.shape != original_shape[:-1]:
             raise ValueError("Weight shape must match particle shape")
@@ -165,13 +179,18 @@ def _cic_paint_dx_impl(displacements, halo_size, weight=1., chunk_size=2**24):
             weight = weight.flatten()
     # Padding is forced to be zero in a single gpu run
 
-    a, b, c = jax.tree.map( lambda x : jnp.stack(jnp.meshgrid(jnp.arange(x.shape[0]),
-                                                    jnp.arange(x.shape[1]),
-                                                    jnp.arange(x.shape[2]),
-                                                    indexing='ij') , axis=0), particle_mesh)
-    
-    particle_mesh = jax.tree.map(lambda x : jnp.pad(x, halo_size), particle_mesh)
-    pmid = jax.tree.map(lambda a, b, c : jnp.stack([a + halo_x, b + halo_y, c], axis=-1), a, b, c)
+    a, b, c = jax.tree.map(
+        lambda x: jnp.stack(jnp.meshgrid(jnp.arange(x.shape[0]),
+                                         jnp.arange(x.shape[1]),
+                                         jnp.arange(x.shape[2]),
+                                         indexing='ij'),
+                            axis=0), particle_mesh)
+
+    particle_mesh = jax.tree.map(lambda x: jnp.pad(x, halo_size),
+                                 particle_mesh)
+    pmid = jax.tree.map(
+        lambda a, b, c: jnp.stack([a + halo_x, b + halo_y, c], axis=-1), a, b,
+        c)
     return scatter(pmid.reshape([-1, 3]),
                    displacements.reshape([-1, 3]),
                    particle_mesh,
@@ -217,12 +236,16 @@ def _cic_read_dx_impl(grid_mesh, disp, halo_size):
                            jnp.arange(original_shape[1]),
                            jnp.arange(original_shape[2]),
                            indexing='ij')
-    a, b, c = jax.tree.map( lambda x : jnp.stack(jnp.meshgrid(jnp.arange(original_shape[0]),
-                                                    jnp.arange(original_shape[1]),
-                                                    jnp.arange(original_shape[2]),
-                                                    indexing='ij') , axis=0), grid_mesh)
+    a, b, c = jax.tree.map(
+        lambda x: jnp.stack(jnp.meshgrid(jnp.arange(original_shape[0]),
+                                         jnp.arange(original_shape[1]),
+                                         jnp.arange(original_shape[2]),
+                                         indexing='ij'),
+                            axis=0), grid_mesh)
 
-    pmid = jax.tree.map(lambda a, b, c : jnp.stack([a + halo_x, b + halo_y, c], axis=-1), a, b, c)
+    pmid = jax.tree.map(
+        lambda a, b, c: jnp.stack([a + halo_x, b + halo_y, c], axis=-1), a, b,
+        c)
     pmid = pmid.reshape([-1, 3])
     disp = disp.reshape([-1, 3])
 

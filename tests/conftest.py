@@ -174,18 +174,22 @@ def nbody_from_lpt2(solver, fpm_lpt2, particle_mesh, lpt_scale_factor):
 
     return fpm_mesh
 
+
 def compare_sharding(sharding1, sharding2):
+
     def get_axis_size(sharding, idx):
         axis_name = sharding.spec[idx]
         if axis_name is None:
             return 1
         else:
             return sharding.mesh.shape[sharding.spec[idx]]
+
     def get_pdims_from_sharding(sharding):
-        return tuple([get_axis_size(sharding, i) for i in range(len(sharding.spec))])
+        return tuple(
+            [get_axis_size(sharding, i) for i in range(len(sharding.spec))])
 
     pdims1 = get_pdims_from_sharding(sharding1)
     pdims2 = get_pdims_from_sharding(sharding2)
-    pdims1 = pdims1 + (1,) * (3 - len(pdims1))
-    pdims2 = pdims2 + (1,) * (3 - len(pdims2))
+    pdims1 = pdims1 + (1, ) * (3 - len(pdims1))
+    pdims2 = pdims2 + (1, ) * (3 - len(pdims2))
     return pdims1 == pdims2
