@@ -2,7 +2,7 @@ import jax.numpy as jnp
 
 
 def MSE(x, y):
-    return jnp.mean((x - y)**2)
+    return ((x - y)**2).mean()
 
 
 def MSE_3D(x, y):
@@ -10,4 +10,4 @@ def MSE_3D(x, y):
 
 
 def MSRE(x, y):
-    return jnp.mean(((x - y) / y)**2)
+    return (((x - y) / y)**2).mean()
