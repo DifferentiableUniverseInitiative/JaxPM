@@ -66,6 +66,7 @@ def test_nbody_grad(simulation_config, initial_conditions, lpt_scale_factor,
                                 t1=1.0,
                                 dt0=None,
                                 y0=y0,
+                                args=cosmo,
                                 adjoint=adjoint,
                                 stepsize_controller=controller,
                                 saveat=saveat)
