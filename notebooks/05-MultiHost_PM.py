@@ -105,8 +105,7 @@ def run_simulation(omega_c, sigma8, mesh_shape, box_size, halo_size,
                    halo_size=halo_size,
                    sharding=sharding)
 
-    ode_fn = ODETerm(
-        make_diffrax_ode(mesh_shape, paint_absolute_pos=False))
+    ode_fn = ODETerm(make_diffrax_ode(mesh_shape, paint_absolute_pos=False))
 
     # Choose solver
     solver = LeapfrogMidpoint() if solver_choice == "leapfrog" else Dopri5()
