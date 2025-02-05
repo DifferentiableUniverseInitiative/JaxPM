@@ -221,4 +221,4 @@ def gaussian_smoothing(im, sigma):
     filter = norm.pdf(k, 0, 1. / (2. * np.pi * sigma))
     filter /= filter[0, 0]
 
-    return jnp.fft.ifft2(jnp.fft.fft2(im) * filter).real
+    return jax.tree.map(lambda im : jnp.fft.ifft2(jnp.fft.fft2(im) * filter).real , im)
