@@ -17,10 +17,8 @@ import jax_cosmo as jc
 import numpy as np
 from diffrax import (ConstantStepSize, Dopri5, LeapfrogMidpoint, ODETerm,
                      PIDController, SaveAt, diffeqsolve)
-from jax.experimental.mesh_utils import create_device_mesh
 from jax.experimental.multihost_utils import process_allgather
-from jax.sharding import Mesh, NamedSharding
-from jax.sharding import PartitionSpec as P
+from jax.sharding import PartitionSpec as P, NamedSharding
 
 from jaxpm.kernels import interpolate_power_spectrum
 from jaxpm.painting import cic_paint_dx
@@ -77,8 +75,8 @@ def parse_arguments():
 
 
 def create_mesh_and_sharding(pdims):
-    devices = create_device_mesh(pdims)
-    mesh = Mesh(devices, axis_names=('x', 'y'))
+
+    mesh = jax.make_mesh(pdims, axis_names=('x', 'y'))
     sharding = NamedSharding(mesh, P('x', 'y'))
     return mesh, sharding
 
@@ -106,7 +104,7 @@ def run_simulation(omega_c, sigma8, mesh_shape, box_size, halo_size,
                    sharding=sharding)
 
     ode_fn = ODETerm(
-        make_diffrax_ode(cosmo, mesh_shape, paint_absolute_pos=False))
+        make_diffrax_ode(mesh_shape, paint_absolute_pos=False , halo_size=halo_size , sharding=sharding))
 
     # Choose solver
     solver = LeapfrogMidpoint() if solver_choice == "leapfrog" else Dopri5()
