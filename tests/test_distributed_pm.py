@@ -258,7 +258,6 @@ def test_distrubted_gradients(simulation_config, initial_conditions, cosmo,
 def test_fwd_rev_gradients(cosmo, pdims):
 
     mesh_shape, box_shape = (8, 8, 8), (20.0, 20.0, 20.0)
-    # SINGLE DEVICE RUN
     cosmo._workspace = {}
 
     mesh = jax.make_mesh(pdims, ('x', 'y'))
@@ -328,7 +327,6 @@ def test_fwd_rev_gradients(cosmo, pdims):
 def test_vmap(cosmo, pdims):
 
     mesh_shape, box_shape = (8, 8, 8), (20.0, 20.0, 20.0)
-    # SINGLE DEVICE RUN
     cosmo._workspace = {}
 
     mesh = jax.make_mesh(pdims, ('x', 'y'))

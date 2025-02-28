@@ -95,6 +95,7 @@ def test_nbody_absolute(simulation_config, initial_conditions,
                             t1=1.0,
                             dt0=None,
                             y0=y0,
+                            args=cosmo,
                             stepsize_controller=controller,
                             saveat=saveat)
 
@@ -140,6 +141,7 @@ def test_nbody_relative(simulation_config, initial_conditions,
                             t1=1.0,
                             dt0=None,
                             y0=y0,
+                            args=cosmo,
                             stepsize_controller=controller,
                             saveat=saveat)
 
