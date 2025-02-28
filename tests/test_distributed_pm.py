@@ -37,12 +37,12 @@ def test_distrubted_pm(simulation_config, initial_conditions, cosmo, order,
                        particles,
                        a=0.1,
                        order=order)
-        ode_fn = ODETerm(make_diffrax_ode(cosmo, mesh_shape))
+        ode_fn = ODETerm(make_diffrax_ode(mesh_shape))
         y0 = jnp.stack([particles + dx, p])
     else:
         dx, p, _ = lpt(cosmo, initial_conditions, a=0.1, order=order)
-        ode_fn = ODETerm(
-            make_diffrax_ode(cosmo, mesh_shape, paint_absolute_pos=False))
+        ode_fn = ODETerm(make_diffrax_ode(mesh_shape,
+                                          paint_absolute_pos=False))
         y0 = jnp.stack([dx, p])
 
     solver = Dopri5()
@@ -94,8 +94,7 @@ def test_distrubted_pm(simulation_config, initial_conditions, cosmo, order,
                        sharding=sharding)
 
         ode_fn = ODETerm(
-            make_diffrax_ode(cosmo,
-                             mesh_shape,
+            make_diffrax_ode(mesh_shape,
                              halo_size=halo_size,
                              sharding=sharding))
 
@@ -108,8 +107,7 @@ def test_distrubted_pm(simulation_config, initial_conditions, cosmo, order,
                        halo_size=halo_size,
                        sharding=sharding)
         ode_fn = ODETerm(
-            make_diffrax_ode(cosmo,
-                             mesh_shape,
+            make_diffrax_ode(mesh_shape,
                              paint_absolute_pos=False,
                              halo_size=halo_size,
                              sharding=sharding))
