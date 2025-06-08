@@ -29,7 +29,7 @@ jobs:
       run: |
         sudo apt-get install -y libopenmpi-dev
         python -m pip install --upgrade pip
-        pip install numpy setuptools cython wheel
+        pip install numpy setuptools cython wheel mpi4py
         pip install -r requirements-test.txt  --no-build-isolation
         pip install jax
         pip install pytest>=8.0.0
