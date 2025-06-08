@@ -29,10 +29,10 @@ jobs:
       run: |
         sudo apt-get install -y libopenmpi-dev
         python -m pip install --upgrade pip
-        pip install numpy==2.2.6 setuptools cython wheel mpi4py
-        pip install -r requirements-test.txt  --no-build-isolation
         pip install jax
-        pip install pytest>=8.0.0
+        pip install setuptools cython wheel mpi4py
+        pip install -r requirements-test.txt  --no-build-isolation
+        pip install pytest
         pip install diffrax
         pip install .
 
@@ -42,4 +42,4 @@ jobs:
         pytest -v -m "not distributed"
     - name: Run Distributed tests
       run: |
-        pytest -v -m distributed
+        pytest -v tests/test_distributed_pm.py
