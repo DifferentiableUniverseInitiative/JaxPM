@@ -22,7 +22,7 @@ from jaxpm.distributed import fft3d, ifft3d
 from jaxpm.painting import cic_paint, cic_paint_dx  # noqa : E402
 from jaxpm.pm import lpt, make_diffrax_ode, pm_forces  # noqa : E402
 
-_TOLERANCE = 1e-1  # 🙃🙃
+_TOLERANCE = 1e-8  # 🎉🎉🎉
 
 pdims = [(1, 8), (8, 1), (4, 2), (2, 4)]
 
