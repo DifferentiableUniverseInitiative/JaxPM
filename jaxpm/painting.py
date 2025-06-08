@@ -240,7 +240,12 @@ def _cic_read_dx_impl(grid_mesh, disp, halo_size):
 def cic_read_dx(grid_mesh, disp, halo_size=0, sharding=None):
 
     halo_size, halo_extents = get_halo_size(halo_size, sharding=sharding)
-    halo_size = jax.tree.map(lambda x: x//2, halo_size)
+    # Halo size is halved for the read operation
+    # We only need to read the density field
+    # while in the painting operation we need to exchange and reduce the halo
+    # We chose to do that since it is much easier to write a custom jvp rule for exchange
+    # while it is a bit harder if there is a reduction involved
+    halo_size = jax.tree.map(lambda x: x // 2, halo_size)
     grid_mesh = slice_pad(grid_mesh, halo_size, sharding=sharding)
     grid_mesh = halo_exchange(grid_mesh,
                               halo_extents=halo_extents,
