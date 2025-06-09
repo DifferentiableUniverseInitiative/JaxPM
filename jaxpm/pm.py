@@ -131,7 +131,7 @@ def linear_field(mesh_shape, box_size, pk, seed, sharding=None):
     Generate initial conditions.
     """
     # Initialize a random field with one slice on each gpu
-    field = normal_field(mesh_shape, seed=seed, sharding=sharding)
+    field = normal_field(seed=seed , shape=mesh_shape, sharding=sharding)
     field = fft3d(field)
     kvec = fftk(field)
     kmesh = sum((kk / box_size[i] * mesh_shape[i])**2

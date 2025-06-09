@@ -166,11 +166,11 @@ def uniform_particles(mesh_shape, sharding=None):
                          axis=-1)
 
 
-def normal_field(mesh_shape, seed, sharding=None, dtype='float32'):
+def normal_field(seed , shape, sharding=None, dtype='float32'):
     """Generate a Gaussian random field with the given power spectrum."""
     gpu_mesh = sharding.mesh if sharding is not None else None
     if gpu_mesh is not None and not (gpu_mesh.empty):
-        local_mesh_shape = get_local_shape(mesh_shape, sharding)
+        local_mesh_shape = get_local_shape(shape, sharding)
 
         size = jax.device_count()
         # rank = jax.process_index()
@@ -195,4 +195,4 @@ def normal_field(mesh_shape, seed, sharding=None, dtype='float32'):
             in_specs=P(None),
             out_specs=spec)(keys)  # yapf: disable
     else:
-        return jax.random.normal(shape=mesh_shape, key=seed, dtype=dtype)
+        return jax.random.normal(shape=shape, key=seed, dtype=dtype)
