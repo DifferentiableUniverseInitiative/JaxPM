@@ -35,6 +35,8 @@ jobs:
         pip install pytest
         pip install diffrax
         pip install .
+        echo "numpy version installed:"
+        python -c "import numpy; print(numpy.__version__)"
 
     - name: Run Single Device Tests
       run: |
