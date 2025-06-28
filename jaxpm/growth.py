@@ -1,5 +1,3 @@
-import os
-
 import jax.numpy as np
 from jax.numpy import interp
 from jax_cosmo.background import *
@@ -121,7 +119,7 @@ def growth_factor(cosmo, a):
     if cosmo._flags["gamma_growth"]:
         return _growth_factor_gamma(cosmo, a)
     else:
-        return _growth_factor_ODE(cosmo, a)[0]
+        return _growth_factor_ODE(cosmo, a)
 
 
 def growth_factor_second(cosmo, a):
@@ -227,7 +225,7 @@ def growth_rate_second(cosmo, a):
         return _growth_rate_second_ODE(cosmo, a)
 
 
-def _growth_factor_ODE(cosmo, a, log10_amin=-3, steps=256, eps=1e-4):
+def _growth_factor_ODE(cosmo, a, log10_amin=-3, steps=128, eps=1e-4):
     """Compute linear growth factor D(a) at a given scale factor,
     normalised such that D(a=1) = 1.
 
@@ -245,11 +243,7 @@ def _growth_factor_ODE(cosmo, a, log10_amin=-3, steps=256, eps=1e-4):
         Growth factor computed at requested scale factor
     """
     # Check if growth has already been computed
-    CACHING_ACTIVATED = os.environ.get("JC_CACHE", "1") == "1"
-    if CACHING_ACTIVATED and "background.growth_factor" in cosmo._workspace.keys(
-    ):
-        cache = cosmo._workspace["background.growth_factor"]
-    else:
+    if not "background.growth_factor" in cosmo._workspace.keys():
         # Compute tabulated array
         atab = np.logspace(log10_amin, 0.0, steps)
 
@@ -296,10 +290,10 @@ def _growth_factor_ODE(cosmo, a, log10_amin=-3, steps=256, eps=1e-4):
             "f2": f2tab,
             "h2": h2tab,
         }
-        if CACHING_ACTIVATED:
-            cosmo._workspace["background.growth_factor"] = cache
-
-    return np.clip(interp(a, cache["a"], cache["g"]), 0.0, 1.0), cache
+        cosmo._workspace["background.growth_factor"] = cache
+    else:
+        cache = cosmo._workspace["background.growth_factor"]
+    return np.clip(interp(a, cache["a"], cache["g"]), 0.0, 1.0)
 
 
 def _growth_rate_ODE(cosmo, a):
@@ -320,8 +314,9 @@ def _growth_rate_ODE(cosmo, a):
         Growth rate computed at requested scale factor
     """
     # Check if growth has already been computed, if not, compute it
-
-    cache = _growth_factor_ODE(cosmo, np.atleast_1d(1.0))[1]
+    if not "background.growth_factor" in cosmo._workspace.keys():
+        _growth_factor_ODE(cosmo, np.atleast_1d(1.0))
+    cache = cosmo._workspace["background.growth_factor"]
     return interp(a, cache["a"], cache["f"])
 
 
@@ -343,10 +338,34 @@ def _growth_factor_second_ODE(cosmo, a):
         Second order growth factor computed at requested scale factor
     """
     # Check if growth has already been computed, if not, compute it
-    #if not "background.growth_factor" in cosmo._workspace.keys():
-    #    _growth_factor_ODE(cosmo, np.atleast_1d(1.0))
-    cache = _growth_factor_ODE(cosmo, a)[1]
+    if not "background.growth_factor" in cosmo._workspace.keys():
+        _growth_factor_ODE(cosmo, np.atleast_1d(1.0))
+    cache = cosmo._workspace["background.growth_factor"]
     return interp(a, cache["a"], cache["g2"])
+
+
+def _growth_rate_ODE(cosmo, a):
+    """Compute growth rate dD/dlna at a given scale factor by solving the linear
+    growth ODE.
+
+    Parameters
+    ----------
+    cosmo: `Cosmology`
+      Cosmology object
+
+    a: array_like
+      Scale factor
+
+    Returns
+    -------
+    f:  ndarray, or float if input scalar
+        Second order growth rate computed at requested scale factor
+    """
+    # Check if growth has already been computed, if not, compute it
+    if not "background.growth_factor" in cosmo._workspace.keys():
+        _growth_factor_ODE(cosmo, np.atleast_1d(1.0))
+    cache = cosmo._workspace["background.growth_factor"]
+    return interp(a, cache["a"], cache["f"])
 
 
 def _growth_rate_second_ODE(cosmo, a):
@@ -367,9 +386,9 @@ def _growth_rate_second_ODE(cosmo, a):
         Second order growth rate computed at requested scale factor
     """
     # Check if growth has already been computed, if not, compute it
-    #if not "background.growth_factor" in cosmo._workspace.keys():
-    #    _growth_factor_ODE(cosmo, np.atleast_1d(1.0))
-    cache = _growth_factor_ODE(cosmo, a)[1]
+    if not "background.growth_factor" in cosmo._workspace.keys():
+        _growth_factor_ODE(cosmo, np.atleast_1d(1.0))
+    cache = cosmo._workspace["background.growth_factor"]
     return interp(a, cache["a"], cache["f2"])
 
 
@@ -392,11 +411,7 @@ def _growth_factor_gamma(cosmo, a, log10_amin=-3, steps=128):
 
     """
     # Check if growth has already been computed, if not, compute it
-    CACHING_ACTIVATED = os.environ.get("JC_CACHE", "1") == "1"
-    if CACHING_ACTIVATED and "background.growth_factor" in cosmo._workspace.keys(
-    ):
-        cache = cosmo._workspace["background.growth_factor"]
-    else:
+    if not "background.growth_factor" in cosmo._workspace.keys():
         # Compute tabulated array
         atab = np.logspace(log10_amin, 0.0, steps)
 
@@ -407,8 +422,9 @@ def _growth_factor_gamma(cosmo, a, log10_amin=-3, steps=128):
         gtab = np.exp(odeint(integrand, np.log(atab[0]), np.log(atab)))
         gtab = gtab / gtab[-1]  # Normalize to a=1.
         cache = {"a": atab, "g": gtab}
-        if CACHING_ACTIVATED:
-            cosmo._workspace["background.growth_factor"] = cache
+        cosmo._workspace["background.growth_factor"] = cache
+    else:
+        cache = cosmo._workspace["background.growth_factor"]
     return np.clip(interp(a, cache["a"], cache["g"]), 0.0, 1.0)
 
 
@@ -505,35 +521,6 @@ def Gf2(cosmo, a):
     return D2f * np.power(a, 3) * np.power(Esqr(cosmo, a), 0.5)
 
 
-def gp(cosmo, a):
-    r""" Derivative of D1 against a
-
-    Parameters
-    ----------
-    cosmo: dict
-      Cosmology dictionary.
-
-    a : array_like
-       Scale factor.
-
-    Returns
-    -------
-    Scalar float Tensor : the derivative of D1 against a.
-
-    Notes
-    -----
-
-    The expression for :math:`gp(a)` is:
-
-    .. math::
-        gp(a)=\frac{dD1}{da}= D'_{1norm}/a
-    """
-    f1 = growth_rate(cosmo, a)
-    g1 = growth_factor(cosmo, a)
-    D1f = f1 * g1 / a
-    return D1f
-
-
 def dGfa(cosmo, a):
     r""" Derivative of Gf against a
 
@@ -562,8 +549,7 @@ def dGfa(cosmo, a):
     f1 = growth_rate(cosmo, a)
     g1 = growth_factor(cosmo, a)
     D1f = f1 * g1 / a
-    #cache = cosmo._workspace['background.growth_factor']
-    cache = _growth_factor_ODE(cosmo, a)[1]
+    cache = cosmo._workspace['background.growth_factor']
     f1p = cache['h'] / cache['a'] * cache['g']
     f1p = interp(np.log(a), np.log(cache['a']), f1p)
     Ea = E(cosmo, a)
@@ -598,8 +584,7 @@ def dGf2a(cosmo, a):
     f2 = growth_rate_second(cosmo, a)
     g2 = growth_factor_second(cosmo, a)
     D2f = f2 * g2 / a
-    #cache = cosmo._workspace['background.growth_factor']
-    cache = _growth_factor_ODE(cosmo, a)[1]
+    cache = cosmo._workspace['background.growth_factor']
     f2p = cache['h2'] / cache['a'] * cache['g2']
     f2p = interp(np.log(a), np.log(cache['a']), f2p)
     E_a = E(cosmo, a)
