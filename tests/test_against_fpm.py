@@ -2,6 +2,7 @@ import pytest
 from diffrax import Dopri5, ODETerm, PIDController, SaveAt, diffeqsolve
 from helpers import MSE, MSRE
 from jax import numpy as jnp
+from numpy.testing import assert_allclose
 
 from jaxpm.distributed import uniform_particles
 from jaxpm.painting import cic_paint, cic_paint_dx
@@ -10,6 +11,8 @@ from jaxpm.utils import power_spectrum
 
 _TOLERANCE = 1e-4
 _PM_TOLERANCE = 1e-3
+_FIELD_RTOL = 1e-4
+_FIELD_ATOL = 1e-3
 
 
 @pytest.mark.single_device
@@ -34,7 +37,10 @@ def test_lpt_absolute(simulation_config, initial_conditions, lpt_scale_factor,
     _, jpm_ps = power_spectrum(lpt_field, box_shape=box_shape)
     _, fpm_ps = power_spectrum(fpm_ref_field, box_shape=box_shape)
 
-    assert MSE(lpt_field, fpm_ref_field) < _TOLERANCE
+    assert_allclose(lpt_field,
+                    fpm_ref_field,
+                    rtol=_FIELD_RTOL,
+                    atol=_FIELD_ATOL)
     assert MSRE(jpm_ps, fpm_ps) < _TOLERANCE
 
 
@@ -55,7 +61,10 @@ def test_lpt_relative(simulation_config, initial_conditions, lpt_scale_factor,
     _, jpm_ps = power_spectrum(lpt_field, box_shape=box_shape)
     _, fpm_ps = power_spectrum(fpm_ref_field, box_shape=box_shape)
 
-    assert MSE(lpt_field, fpm_ref_field) < _TOLERANCE
+    assert_allclose(lpt_field,
+                    fpm_ref_field,
+                    rtol=_FIELD_RTOL,
+                    atol=_FIELD_ATOL)
     assert MSRE(jpm_ps, fpm_ps) < _TOLERANCE
 
 
@@ -76,7 +85,7 @@ def test_nbody_absolute(simulation_config, initial_conditions,
                    a=lpt_scale_factor,
                    order=order)
 
-    ode_fn = ODETerm(make_diffrax_ode(cosmo, mesh_shape))
+    ode_fn = ODETerm(make_diffrax_ode(mesh_shape))
 
     solver = Dopri5()
     controller = PIDController(rtol=1e-8,
@@ -95,6 +104,7 @@ def test_nbody_absolute(simulation_config, initial_conditions,
                             t1=1.0,
                             dt0=None,
                             y0=y0,
+                            args=cosmo,
                             stepsize_controller=controller,
                             saveat=saveat)
 
@@ -105,7 +115,10 @@ def test_nbody_absolute(simulation_config, initial_conditions,
     _, jpm_ps = power_spectrum(final_field, box_shape=box_shape)
     _, fpm_ps = power_spectrum(fpm_ref_field, box_shape=box_shape)
 
-    assert MSE(final_field, fpm_ref_field) < _PM_TOLERANCE
+    assert_allclose(final_field,
+                    fpm_ref_field,
+                    rtol=_FIELD_RTOL,
+                    atol=_FIELD_ATOL)
     assert MSRE(jpm_ps, fpm_ps) < _PM_TOLERANCE
 
 
@@ -121,8 +134,7 @@ def test_nbody_relative(simulation_config, initial_conditions,
     # Initial displacement
     dx, p, _ = lpt(cosmo, initial_conditions, a=lpt_scale_factor, order=order)
 
-    ode_fn = ODETerm(
-        make_diffrax_ode(cosmo, mesh_shape, paint_absolute_pos=False))
+    ode_fn = ODETerm(make_diffrax_ode(mesh_shape, paint_absolute_pos=False))
 
     solver = Dopri5()
     controller = PIDController(rtol=1e-9,
@@ -141,6 +153,7 @@ def test_nbody_relative(simulation_config, initial_conditions,
                             t1=1.0,
                             dt0=None,
                             y0=y0,
+                            args=cosmo,
                             stepsize_controller=controller,
                             saveat=saveat)
 
@@ -151,5 +164,8 @@ def test_nbody_relative(simulation_config, initial_conditions,
     _, jpm_ps = power_spectrum(final_field, box_shape=box_shape)
     _, fpm_ps = power_spectrum(fpm_ref_field, box_shape=box_shape)
 
-    assert MSE(final_field, fpm_ref_field) < _PM_TOLERANCE
+    assert_allclose(final_field,
+                    fpm_ref_field,
+                    rtol=_FIELD_RTOL,
+                    atol=_FIELD_ATOL)
     assert MSRE(jpm_ps, fpm_ps) < _PM_TOLERANCE

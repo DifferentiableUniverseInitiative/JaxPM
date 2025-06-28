@@ -131,7 +131,7 @@ def linear_field(mesh_shape, box_size, pk, seed, sharding=None):
     Generate initial conditions.
     """
     # Initialize a random field with one slice on each gpu
-    field = normal_field(mesh_shape, seed=seed, sharding=sharding)
+    field = normal_field(seed=seed, shape=mesh_shape, sharding=sharding)
     field = fft3d(field)
     kvec = fftk(field)
     kmesh = sum((kk / box_size[i] * mesh_shape[i])**2
@@ -172,8 +172,7 @@ def make_ode_fn(mesh_shape,
     return nbody_ode
 
 
-def make_diffrax_ode(cosmo,
-                     mesh_shape,
+def make_diffrax_ode(mesh_shape,
                      paint_absolute_pos=True,
                      halo_size=0,
                      sharding=None):
@@ -183,6 +182,7 @@ def make_diffrax_ode(cosmo,
         state is a tuple (position, velocities)
         """
         pos, vel = state
+        cosmo = args
 
         forces = pm_forces(pos,
                            mesh_shape=mesh_shape,
