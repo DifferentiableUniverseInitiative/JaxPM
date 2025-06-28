@@ -93,7 +93,7 @@ def fpm_initial_conditions(cosmo, particle_mesh):
     def pk_fn(x):
         return jnp.interp(x.reshape([-1]), k, pk).reshape(x.shape)
 
-    whitec = particle_mesh.generate_whitenoise(42,
+    whitec = particle_mesh.generate_whitenoise(123,
                                                type='complex',
                                                unitary=False)
     lineark = whitec.apply(lambda k, v: pk_fn(sum(ki**2 for ki in k)**0.5)**0.5
@@ -151,7 +151,7 @@ def nbody_from_lpt1(solver, fpm_lpt1, particle_mesh, lpt_scale_factor):
     if lpt_scale_factor == 0.8:
         pytest.skip("Do not run nbody simulation from scale factor 0.8")
 
-    stages = np.linspace(lpt_scale_factor, 1.0, 10, endpoint=True)
+    stages = np.linspace(lpt_scale_factor, 1.0, 100, endpoint=True)
 
     finalstate = solver.nbody(fpm_lpt1, leapfrog(stages))
     fpm_mesh = particle_mesh.paint(finalstate.X).value
@@ -167,7 +167,7 @@ def nbody_from_lpt2(solver, fpm_lpt2, particle_mesh, lpt_scale_factor):
     if lpt_scale_factor == 0.8:
         pytest.skip("Do not run nbody simulation from scale factor 0.8")
 
-    stages = np.linspace(lpt_scale_factor, 1.0, 10, endpoint=True)
+    stages = np.linspace(lpt_scale_factor, 1.0, 100, endpoint=True)
 
     finalstate = solver.nbody(fpm_lpt2, leapfrog(stages))
     fpm_mesh = particle_mesh.paint(finalstate.X).value
