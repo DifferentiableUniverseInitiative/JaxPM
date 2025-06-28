@@ -93,7 +93,7 @@ def fpm_initial_conditions(cosmo, particle_mesh):
     def pk_fn(x):
         return jnp.interp(x.reshape([-1]), k, pk).reshape(x.shape)
 
-    whitec = particle_mesh.generate_whitenoise(123,
+    whitec = particle_mesh.generate_whitenoise(42,
                                                type='complex',
                                                unitary=False)
     lineark = whitec.apply(lambda k, v: pk_fn(sum(ki**2 for ki in k)**0.5)**0.5
