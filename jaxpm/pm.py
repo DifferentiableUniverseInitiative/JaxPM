@@ -139,7 +139,7 @@ def linear_field(mesh_shape, box_size, pk, seed, sharding=None):
     pkmesh = pk(kmesh) * (mesh_shape[0] * mesh_shape[1] * mesh_shape[2]) / (
         box_size[0] * box_size[1] * box_size[2])
 
-    field = field * (pkmesh)**0.5
+    field = field * jnp.sqrt(pkmesh)
     field = ifft3d(field)
     return field
 

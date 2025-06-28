@@ -26,7 +26,7 @@ def E(cosmo, a):
     where :math:`f(a)` is the Dark Energy evolution parameter computed
     by :py:meth:`.f_de`.
     """
-    return np.power(Esqr(cosmo, a), 0.5)
+    return np.sqrt(Esqr(cosmo, a))
 
 
 def df_de(cosmo, a, epsilon=1e-5):
