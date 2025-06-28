@@ -1,5 +1,5 @@
-pytest>=8.0.0
-diffrax
 pfft-python @ git+https://github.com/MP-Gadget/pfft-python
 pmesh @ git+https://github.com/MP-Gadget/pmesh
 fastpm @ git+https://github.com/ASKabalan/fastpm-python
+numpy==2.2.6
+diffrax

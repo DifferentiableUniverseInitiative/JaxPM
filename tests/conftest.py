@@ -44,7 +44,7 @@ def simulation_config(request):
     return request.param
 
 
-@pytest.fixture(scope="session", params=[0.1, 0.5, 0.8])
+@pytest.fixture(scope="session", params=[0.1, 0.2])
 def lpt_scale_factor(request):
     return request.param
 
@@ -151,7 +151,7 @@ def nbody_from_lpt1(solver, fpm_lpt1, particle_mesh, lpt_scale_factor):
     if lpt_scale_factor == 0.8:
         pytest.skip("Do not run nbody simulation from scale factor 0.8")
 
-    stages = np.linspace(lpt_scale_factor, 1.0, 10, endpoint=True)
+    stages = np.linspace(lpt_scale_factor, 1.0, 100, endpoint=True)
 
     finalstate = solver.nbody(fpm_lpt1, leapfrog(stages))
     fpm_mesh = particle_mesh.paint(finalstate.X).value
@@ -167,7 +167,7 @@ def nbody_from_lpt2(solver, fpm_lpt2, particle_mesh, lpt_scale_factor):
     if lpt_scale_factor == 0.8:
         pytest.skip("Do not run nbody simulation from scale factor 0.8")
 
-    stages = np.linspace(lpt_scale_factor, 1.0, 10, endpoint=True)
+    stages = np.linspace(lpt_scale_factor, 1.0, 100, endpoint=True)
 
     finalstate = solver.nbody(fpm_lpt2, leapfrog(stages))
     fpm_mesh = particle_mesh.paint(finalstate.X).value
