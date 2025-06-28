@@ -11,8 +11,8 @@ from jaxpm.utils import power_spectrum
 
 _TOLERANCE = 1e-4
 _PM_TOLERANCE = 1e-3
-_FIELD_RTOL = 1e-2
-_FIELD_ATOL = 1e-1
+_FIELD_RTOL = 1e-4
+_FIELD_ATOL = 1e-3
 
 
 @pytest.mark.single_device

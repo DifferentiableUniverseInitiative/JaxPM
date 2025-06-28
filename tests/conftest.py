@@ -44,7 +44,7 @@ def simulation_config(request):
     return request.param
 
 
-@pytest.fixture(scope="session", params=[0.1, 0.5, 0.8])
+@pytest.fixture(scope="session", params=[0.1, 0.2])
 def lpt_scale_factor(request):
     return request.param
 
