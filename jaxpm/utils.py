@@ -52,7 +52,7 @@ def _initialize_pk(mesh_shape, box_shape, kedges, los):
     kshapes = np.eye(len(mesh_shape), dtype=np.int32) * -2 + 1
     kvec = [(2 * np.pi * m / l) * np.fft.fftfreq(m).reshape(kshape)
             for m, l, kshape in zip(mesh_shape, box_shape, kshapes)]
-    kmesh = sum(ki**2 for ki in kvec)**0.5
+    kmesh = jnp.sqrt(sum(ki**2 for ki in kvec))
 
     dig = np.digitize(kmesh.reshape(-1), kedges)
     kcount = np.bincount(dig, minlength=len(kedges) + 1)

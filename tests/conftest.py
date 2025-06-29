@@ -96,8 +96,9 @@ def fpm_initial_conditions(cosmo, particle_mesh):
     whitec = particle_mesh.generate_whitenoise(42,
                                                type='complex',
                                                unitary=False)
-    lineark = whitec.apply(lambda k, v: pk_fn(sum(ki**2 for ki in k)**0.5)**0.5
-                           * v * (1 / v.BoxSize).prod()**0.5)
+    lineark = whitec.apply(lambda k, v: jnp.sqrt(
+        pk_fn(jnp.sqrt(sum(ki**2 for ki in k)))) * v * jnp.sqrt(
+            (1 / v.BoxSize).prod()))
     init_mesh = lineark.c2r().value  # XXX
 
     return lineark, grid, init_mesh
