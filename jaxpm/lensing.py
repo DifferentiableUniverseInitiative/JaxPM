@@ -7,7 +7,7 @@ from jax.scipy.ndimage import map_coordinates
 
 from jaxpm.distributed import uniform_particles
 from jaxpm.painting import cic_paint, cic_paint_2d, cic_paint_dx
-from jaxpm.spherical import paint_spherical
+from jaxpm.spherical import paint_particles_spherical
 from jaxpm.utils import gaussian_smoothing
 
 
@@ -54,33 +54,29 @@ def density_plane_fn(box_shape,
     return f
 
 
-def spherical_density_fn(box_shape,
-                         box_size,
-                         nside,
-                         fov,
-                         center_radec,
-                         observer_position,
-                         d_R,
-                         sharding=None):
+def spherical_density_fn(mesh_shape, box_size, nside, observer_position, d_R):
 
     def f(t, y, args):
-        positions = y[0]
-        nx, ny, nz = box_shape
-        bx, by, bz = box_size
+        positions = y[1]
         cosmo = args
-        # Converts time t to comoving distance in voxel coordinates
-        w = d_R / box_size[2] * box_shape[2]
-        center = ((jc.background.radial_comoving_distance(cosmo, t)) / bz) * nz
 
-        # Apply sharding in order to recover sharding when taking gradients
-        if sharding is not None:
-            positions = jax.lax.with_sharding_constraint(positions, sharding)
+        positions = uniform_particles(mesh_shape) + positions
 
-        density_mesh = cic_paint_dx(positions)
-        # Project to spherical map
-        spherical_map = paint_spherical(density_mesh, nside, fov, center_radec,
-                                        observer_position, box_size, center,
-                                        d_R)
+        # Calculate comoving distance range for this shell
+        r_center = jc.background.radial_comoving_distance(cosmo, t)
+        r_max = jnp.clip(r_center + d_R / 2, 0, box_size[2])
+        r_min = jnp.clip(r_center - d_R / 2, 0, box_size[2])
+
+        # Paint particles in this shell onto a HEALPix map
+        spherical_map = paint_particles_spherical(
+            positions,
+            nside=nside,
+            observer_position=observer_position,
+            R_min=r_min,
+            R_max=r_max,
+            box_size=box_size,
+            mesh_shape=mesh_shape)
+
         return spherical_map
 
     return f
