@@ -220,3 +220,143 @@ def gaussian_smoothing(im, sigma):
     filter /= filter[0, 0]
 
     return jnp.fft.ifft2(jnp.fft.fft2(im) * filter).real
+
+
+
+def flat_sky_power_spectrum(kappa_map, angle_deg, kappa_map2=None, ells=None):
+    """
+    Compute flat-sky angular power spectrum from 2D convergence maps.
+    
+    This function computes auto-power spectra (when kappa_map2=None) or 
+    cross-power spectra (when kappa_map2 is provided) using the flat-sky 
+    approximation where ℓ = k. The implementation matches lenstools for 
+    accurate cosmological analysis.
+    
+    Parameters
+    ----------
+    kappa_map : array_like, shape (N, N)
+        2D convergence map or other projected field
+    angle_deg : float
+        Angular size of the map in degrees
+    kappa_map2 : array_like, shape (N, N), optional
+        Second map for cross-power spectrum. If None, computes auto-power.
+    ells : array_like, optional
+        Multipole bins for output. If None, uses logarithmic binning from
+        ℓ_min = max(2π/θ, 10) to ℓ_max = π/pixel_scale with 20 bins.
+        
+    Returns
+    -------
+    ell_centers : array
+        Centers of multipole bins
+    cl : array
+        Angular power spectrum C_ℓ (auto or cross)
+        
+    Notes
+    -----
+    The normalization follows the convention:
+    C_ℓ = |FFT[κ]|² × (θ_rad²) / (N_pix⁴)
+    
+    This matches the lenstools.ConvergenceMap.powerSpectrum() implementation
+    and is suitable for weak lensing and other flat-sky analyses.
+    
+    For cross-power spectra, computes:
+    C_ℓ^{AB} = Re[FFT[A] × FFT[B]*] × (θ_rad²) / (N_pix⁴)
+    
+    Examples
+    --------
+    Auto-power spectrum:
+    
+    >>> ell, cl = flat_sky_power_spectrum(kappa_map, angle_deg=10.0)
+    
+    Cross-power spectrum:
+    
+    >>> ell, cl_cross = flat_sky_power_spectrum(map1, 10.0, map2)
+    
+    Custom ℓ binning:
+    
+    >>> ells = jnp.logspace(jnp.log10(50), jnp.log10(1000), 15)
+    >>> ell, cl = flat_sky_power_spectrum(kappa_map, 10.0, ells=ells)
+    """
+    kappa_map = jnp.asarray(kappa_map)
+    if kappa_map.ndim != 2 or kappa_map.shape[0] != kappa_map.shape[1]:
+        raise ValueError("kappa_map must be a 2D square array")
+    
+    npix = kappa_map.shape[0]
+    
+    # Convert angle to radians
+    angle_rad = angle_deg * jnp.pi / 180.0
+    
+    # Pixel scale in radians
+    pixel_scale = angle_rad / npix
+    
+    # Remove mean (removes monopole)
+    kappa_centered = kappa_map - jnp.mean(kappa_map)
+    
+    # 2D FFT
+    kappa_fft = jnp.fft.fft2(kappa_centered)
+    
+    # Handle cross-power spectrum
+    if kappa_map2 is not None:
+        kappa_map2 = jnp.asarray(kappa_map2)
+        if kappa_map2.shape != kappa_map.shape:
+            raise ValueError("kappa_map2 must have same shape as kappa_map")
+        
+        kappa2_centered = kappa_map2 - jnp.mean(kappa_map2)
+        kappa2_fft = jnp.fft.fft2(kappa2_centered)
+        
+        # Cross-power: Re[A × B*]
+        power_2d = jnp.real(kappa_fft * jnp.conj(kappa2_fft))
+    else:
+        # Auto-power: |A|²
+        power_2d = jnp.abs(kappa_fft)**2
+    
+    # Apply normalization: matches lenstools convention
+    # Use float64 to avoid overflow for large npix
+    normalization = (angle_rad**2) / jnp.float64(npix)**4
+    power_2d = power_2d * normalization
+    
+    # Create wavenumber grids
+    kx = jnp.fft.fftfreq(npix, pixel_scale) * 2 * jnp.pi
+    ky = jnp.fft.fftfreq(npix, pixel_scale) * 2 * jnp.pi
+    kx_grid, ky_grid = jnp.meshgrid(kx, ky, indexing='ij')
+    
+    # Total wavenumber magnitude
+    k_grid = jnp.sqrt(kx_grid**2 + ky_grid**2)
+    
+    # In flat sky approximation: ℓ = k
+    ell_grid = k_grid
+    
+    # Default ell binning if not provided
+    if ells is None:
+        ell_min = max(2 * jnp.pi / angle_rad, 10)  # Fundamental mode or ℓ=10
+        ell_max = jnp.pi / pixel_scale  # Nyquist limit
+        ells = jnp.logspace(jnp.log10(float(ell_min)), jnp.log10(float(ell_max)), 20)
+    else:
+        ells = jnp.asarray(ells)
+    
+    ell_centers = 0.5 * (ells[1:] + ells[:-1])
+    
+    # Bin the power spectrum
+    cl_binned = []
+    
+    for i in range(len(ells) - 1):
+        # Mask for this ell bin
+        mask = (ell_grid >= ells[i]) & (ell_grid < ells[i+1])
+        
+        n_modes = jnp.sum(mask)
+        if n_modes > 0:
+            # Average power in this bin
+            power_sum = jnp.sum(power_2d * mask)
+            cl_value = power_sum / n_modes
+            cl_binned.append(cl_value)
+        else:
+            cl_binned.append(jnp.nan)
+    
+    cl_binned = jnp.array(cl_binned)
+    
+    # Remove NaN values
+    valid_mask = ~jnp.isnan(cl_binned)
+    ell_centers = ell_centers[valid_mask]
+    cl_binned = cl_binned[valid_mask]
+    
+    return ell_centers, cl_binned
