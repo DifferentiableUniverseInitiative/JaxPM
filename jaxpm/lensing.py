@@ -59,7 +59,7 @@ def density_plane_fn(box_shape,
     return f
 
 
-def spherical_density_fn(mesh_shape, box_size, nside, observer_position, d_R):
+def spherical_density_fn(mesh_shape, box_size, nside, observer_position, d_R, sharding=None):
 
     def f(t, y, args):
         positions = y
@@ -71,6 +71,9 @@ def spherical_density_fn(mesh_shape, box_size, nside, observer_position, d_R):
         r_center = jc.background.radial_comoving_distance(cosmo, t)
         r_max = jnp.clip(r_center + d_R / 2, 0, box_size[2])
         r_min = jnp.clip(r_center - d_R / 2, 0, box_size[2])
+
+        if sharding is not None:
+            positions = jax.lax.with_sharding_constraint(positions, sharding)
 
         # Paint particles in this shell onto a HEALPix map
         spherical_map = paint_particles_spherical(
