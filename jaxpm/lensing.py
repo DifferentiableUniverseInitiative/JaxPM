@@ -46,9 +46,14 @@ def density_plane_fn(box_shape,
         # Apply CIC painting
         density_plane = cic_paint_2d(zero_mesh, xy, weight)
 
-        # Apply density normalization
-        density_plane = density_plane / ((nx / density_plane_npix) *
-                                         (ny / density_plane_npix) * w)
+        # Calculate physical volume per pixel
+        pixel_area = (box_size[0] / density_plane_npix) * (box_size[1] / density_plane_npix)
+        shell_thickness_physical = density_plane_width  # Already in physical units
+        pixel_volume = pixel_area * shell_thickness_physical
+
+        # Convert counts to density (particles per unit volume)
+        density_plane = density_plane / pixel_volume
+
         return density_plane
 
     return f
@@ -85,93 +90,88 @@ def spherical_density_fn(mesh_shape, box_size, nside, observer_position, d_R):
 # ==========================================================
 # Weak Lensing Born Approximation
 # ==========================================================
-def convergence_Born(cosmo, density_planes, r, a, dx, dz, coords, z_source):
+def convergence_Born(cosmo, density_planes, r, a, z_source, d_r,
+                     dx=None, coords=None):
     """
-    Compute Born-approximation lensing convergence maps.
-
+    Born approximation convergence for both spherical and flat geometries.
+    
     Parameters
     ----------
     cosmo : jc.Cosmology
-        Cosmology object.
+        Cosmology object
     density_planes : ndarray
-        3D array of lensing density planes [nx, ny, n_planes].
-    r, a : ndarray
-        Comoving distances and scale factors per plane.
-    dx : float
-        Pixel scale.
-    dz : float
-        Redshift bin width.
-    coords : ndarray
-        Angular coordinates grid [2, N, 2] in radians.
-    z_source : ndarray
-        Source redshifts.
-
+        - Spherical: [n_planes, npix] - density on HEALPix grid
+        - Flat: [n_planes, nx, ny] - density on Cartesian grid
+        Note: d_R is already included in the density normalization
+    r : ndarray
+        Comoving distances to plane centers [n_planes]
+    a : ndarray
+        Scale factors at plane centers [n_planes]
+    z_source : float or ndarray
+        Source redshift(s)
+    dx : float, optional
+        Pixel size for flat-sky case (required for flat)
+    coords : ndarray, optional
+        Angular coordinates for flat-sky (required for flat)
+        
     Returns
     -------
     convergence : ndarray
-        2D convergence map for each source redshift.
+        Convergence map
     """
+    # Constants
     constant_factor = 3 / 2 * cosmo.Omega_m * (constants.H0 / constants.c)**2
-    # Compute comoving distance of source galaxies
-    r_s = jc.background.radial_comoving_distance(cosmo, 1 / (1 + z_source))
+    chi_s = jc.background.radial_comoving_distance(cosmo, jc.utils.z2a(z_source)) 
     n_planes = len(r)
-
+    
+    # Detect geometry from input shape
+    is_spherical = density_planes.ndim == 2  # [n_planes, npix]
+    
+    if not is_spherical:
+        assert dx is not None and coords is not None, "dx and coords required for flat geometry"
+    
     def scan_fn(carry, i):
         density_planes, a, r = carry
+        
+        # Get density for this plane - plane index is always first
+        rho = density_planes[i]  # Works for both geometries
+        
+        # Convert density to overdensity: δ = ρ/ρ̄ - 1
+        # Use proper cosmological mean density for correct normalization
+        # The simulation density should be normalized to the mean density
+        rho_mean = jnp.mean(rho)
+        delta = rho / rho_mean - 1
+        
+        # Lensing kernel: W(χ,χs)/a(χ)
+        chi = r[i]
+        lensing_efficiency = chi * jnp.maximum(chi_s - chi, 0) / chi_s
+        lensing_kernel = constant_factor * lensing_efficiency / a[i]
+        
+        print(f"Shape of lensing kernel: {lensing_kernel.shape}, "
+              f"Shape of delta: {delta.shape}, "
+              f"Shape of r: {r.shape}, ")
+        # Apply kernel to overdensity
+        kappa_contribution = lensing_kernel * delta * d_r
+        
+        if not is_spherical:
+            # For flat-sky: interpolate at light ray positions
+            physical_coords = coords * chi / dx
+            kappa_contribution = map_coordinates(
+                kappa_contribution, 
+                physical_coords - 0.5,
+                order=1, 
+                mode="wrap"
+            )
+        
+        return carry, kappa_contribution
+    
+    # Integrate over all planes
+    _, kappa_contributions = jax.lax.scan(scan_fn, (density_planes, a, r), 
+                                          jnp.arange(n_planes))
+    
+    # Sum contributions
+    convergence = jnp.sum(kappa_contributions, axis=0)
+    
+    return convergence
 
-        p = density_planes[:, :, i]
-        density_normalization = dz * r[i] / a[i]
-        p = (p - p.mean()) * constant_factor * density_normalization
 
-        # Interpolate at the density plane coordinates
-        im = map_coordinates(p, coords * r[i] / dx - 0.5, order=1, mode="wrap")
-
-        return carry, im * jnp.clip(1.0 -
-                                    (r[i] / r_s), 0, 1000).reshape([-1, 1, 1])
-
-    _, convergence = jax.lax.scan(scan_fn, (density_planes, a, r),
-                                  jnp.arange(n_planes))
-    return convergence.sum(axis=0)
-
-
-def spherical_convergence_Born(cosmo, density_planes, r, a, nside, z_source):
-    """
-    Compute Born-approximation lensing convergence maps on a sphere.
-
-    Parameters
-    ----------
-    cosmo : jc.Cosmology
-        Cosmology object.
-    density_planes : ndarray
-        3D array of lensing density planes [n_planes, npix].
-    r, a : ndarray
-        Comoving distances and scale factors per plane.
-    nside : int
-        Healpix nside parameter.
-    z_source : ndarray
-        Source redshifts.
-
-    Returns
-    -------
-    convergence : ndarray
-        2D convergence map for each source redshift.
-    """
-    constant_factor = 3 / 2 * cosmo.Omega_m * (constants.H0 / constants.c)**2
-    # Compute comoving distance of source galaxies
-    r_s = jc.background.radial_comoving_distance(cosmo, 1 / (1 + z_source))
-    n_planes = len(r)
-
-    def scan_fn(carry, i):
-        density_planes, a, r = carry
-
-        p = density_planes[i, :]
-        density_normalization = r[i] / a[
-            i]  # This normalization needs to be checked
-        p = (p - p.mean()) * constant_factor * density_normalization
-
-        return carry, p * jnp.clip(1.0 -
-                                   (r[i] / r_s), 0, 1000).reshape([-1, 1])
-
-    _, convergence = jax.lax.scan(scan_fn, (density_planes, a, r),
-                                  jnp.arange(n_planes))
-    return convergence.sum(axis=0)

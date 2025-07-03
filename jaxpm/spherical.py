@@ -42,6 +42,20 @@ def paint_particles_spherical(positions,
     healpix_map : ndarray
         HEALPix density map
     """
+    # Check resolution warning
+    res_deg = jhp.nside2resol(nside, arcmin=True) / 60
+    box_diagonal = jnp.sqrt(sum([bs**2 for bs in box_size]))
+    typical_angular_scale = jnp.degrees(jnp.arctan(min(box_size) / box_diagonal))
+    
+    #if res_deg > typical_angular_scale:
+    #    jax.debug.print(
+    #        "WARNING: HEALPix resolution ({res_deg} deg) is larger than typical box angular scale ({typical_angular_scale:} deg). "
+    #        "Consider decreasing nside from {nside} or increasing box size. "
+    #        "Current box size: {box_size}, nside resolution: {res_deg*60:.2f} arcmin" , res_deg=res_deg,
+    #        typical_angular_scale=typical_angular_scale,
+    #        nside=nside, box_size=box_size
+    #    )
+    
     if weights is None:
         weights = jnp.ones(positions.shape[:-1])
 
@@ -76,6 +90,15 @@ def paint_particles_spherical(positions,
     # Bin particles into HEALPix pixels
     npix = jhp.nside2npix(nside)
     healpix_map = jnp.bincount(pixels, weights=masked_weights, length=npix)
+    
+    # Calculate volume per pixel in spherical shell
+    pixel_solid_angle = 4 * jnp.pi / npix  # steradians per pixel
+    R_center = 0.5 * (R_min + R_max)
+    shell_thickness = R_max - R_min
+    shell_volume_per_pixel = pixel_solid_angle * R_center**2 * shell_thickness
+
+    # Convert particle counts to density (particles per unit volume)
+    healpix_map = healpix_map / shell_volume_per_pixel
 
     return healpix_map
 
