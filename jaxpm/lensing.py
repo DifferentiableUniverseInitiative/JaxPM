@@ -18,7 +18,7 @@ def density_plane_fn(box_shape,
                      sharding=None):
 
     def f(t, y, args):
-        positions = y[0]
+        positions = y
         cosmo = args
         nx, ny, nz = box_shape
 
@@ -62,7 +62,7 @@ def density_plane_fn(box_shape,
 def spherical_density_fn(mesh_shape, box_size, nside, observer_position, d_R):
 
     def f(t, y, args):
-        positions = y[1]
+        positions = y
         cosmo = args
 
         positions = uniform_particles(mesh_shape) + positions
