@@ -141,29 +141,31 @@ def convergence_Born(cosmo, density_planes, r, a, z_source, d_r,
         # The simulation density should be normalized to the mean density
         rho_mean = jnp.mean(rho)
         delta = rho / rho_mean - 1
-        
-        # Lensing kernel: W(χ,χs)/a(χ)
+ 
+        # Multiply by dχ * χ / a(χ) 
         chi = r[i]
-        lensing_efficiency = chi * jnp.maximum(chi_s - chi, 0) / chi_s
-        lensing_kernel = constant_factor * lensing_efficiency / a[i]
-        
-        print(f"Shape of lensing kernel: {lensing_kernel.shape}, "
-              f"Shape of delta: {delta.shape}, "
-              f"Shape of r: {r.shape}, ")
-        # Apply kernel to overdensity
-        kappa_contribution = lensing_kernel * delta * d_r
-        
+        delta *= d_r * chi / a[i]
+        # Multiply by the constant factor
+        delta *= constant_factor
         if not is_spherical:
             # For flat-sky: interpolate at light ray positions
             physical_coords = coords * chi / dx
-            kappa_contribution = map_coordinates(
-                kappa_contribution, 
+            delta = map_coordinates(
+                delta, 
                 physical_coords - 0.5,
                 order=1, 
                 mode="wrap"
             )
+
+        # Lensing kernel: W(χ,χs)/a(χ)
+        # Already multiplied by dχ * χ / a(χ) above
+        # So we need to multiply by  χs - χ / χs
         
-        return carry, kappa_contribution
+        lensing_efficiency = jnp.clip(1.0 - (chi / chi_s), 0, 1000)
+        lensing_efficiency = lensing_efficiency.reshape(-1 , *(1,) * delta.ndim)
+        # Apply kernel to overdensity
+        kappa_contribution = lensing_efficiency * delta 
+        return carry, kappa_contribution.sum(axis=0)
     
     # Integrate over all planes
     _, kappa_contributions = jax.lax.scan(scan_fn, (density_planes, a, r), 
