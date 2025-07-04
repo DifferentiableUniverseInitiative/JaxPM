@@ -304,39 +304,6 @@ def paint_particles_spherical(positions,
     healpix_map : ndarray
         HEALPix density map
     """        
-    # Check particle density warning
-    total_particles = jnp.prod(jnp.array(positions.shape[:-1]))  # Total number of particles
-    npix = jhp.nside2npix(nside)  # Total HEALPix pixels
-    
-    # Estimate fraction of particles in the shell
-    # Approximate shell volume vs box volume
-    box_diagonal = jnp.sqrt(jnp.sum(jnp.array(box_size)**2))
-    max_distance = box_diagonal / 2  # Maximum possible distance from center
-    shell_volume_fraction = ((R_max**3 - R_min**3) / 3) / (max_distance**3 / 3)
-    shell_volume_fraction = jnp.minimum(shell_volume_fraction, 1.0)  # Cap at 1.0
-    
-    estimated_particles_in_shell = total_particles * shell_volume_fraction
-    particles_per_pixel = estimated_particles_in_shell / npix
-    
-    # Warn if particles per pixel is too low (threshold: 1 particle per pixel)
-    min_particles_per_pixel = 1.0
-    jax.lax.cond(particles_per_pixel < min_particles_per_pixel,
-        lambda: jax.debug.print(
-            "WARNING: Low particle density detected! "
-            "Estimated {particles_per_pixel} particles per pixel (threshold: {min_threshold}). "
-            "This may result in shot noise and low statistical power. "
-            "Consider: increasing mesh resolution, decreasing nside from {nside}, or using a thicker shell. "
-            "Total particles: {total_particles}, Shell fraction: {shell_fraction}, Pixels: {npix}",
-            particles_per_pixel=particles_per_pixel,
-            min_threshold=min_particles_per_pixel,
-            nside=nside,
-            total_particles=total_particles,
-            shell_fraction=shell_volume_fraction,
-            npix=npix
-        ),
-        lambda: None
-    )
-    
     # Choose method
     if method.upper() == 'CIC':
         return paint_particles_spherical_cic(
