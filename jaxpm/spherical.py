@@ -3,23 +3,109 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import jax_healpy as jhp
+import numpy as np
 
-from jaxpm.distributed import uniform_particles
-
-
-@partial(jax.jit, static_argnames=('nside', 'mesh_shape', 'box_size'))
-def paint_particles_spherical(positions,
-                              nside,
-                              observer_position,
-                              R_min,
-                              R_max,
-                              box_size,
-                              mesh_shape,
-                              weights=None):
+def _healpix_cic_weights(nside, theta, phi):
     """
-    Directly bin particles onto HEALPix spherical maps without intermediate
-    3D Cartesian mesh. This avoids double binning artifacts.
+    Compute CIC (Cloud-in-Cell) weights for HEALPix pixels.
+    
+    This implements a simplified differentiable CIC scheme for spherical coordinates.
+    Instead of using exact HEALPix face projections, we use a smooth approximation
+    based on angular distances to nearby pixels.
+    
+    Parameters
+    ----------
+    nside : int
+        HEALPix nside parameter
+    theta : array_like
+        Colatitude in radians (0 to pi)
+    phi : array_like
+        Longitude in radians (0 to 2pi)
+        
+    Returns
+    -------
+    pixel_indices : array, shape (4, N)
+        Four neighbor pixel indices for each particle
+    weights : array, shape (4, N)
+        CIC weights for each neighbor pixel
+    """
+    # Convert to HEALPix pixel coordinates
+    host_pixels = jhp.ang2pix(nside, theta, phi)
+    
+    # Get pixel centers for the host pixel
+    theta_host, phi_host = jhp.pix2ang(nside, host_pixels)
+    
+    # Estimate pixel size in radians
+    pixel_size = jnp.sqrt(4 * jnp.pi / (12 * nside**2))
+    
+    # Compute offsets from pixel center
+    dtheta = theta - theta_host
+    dphi = phi - phi_host
+    
+    # Handle phi wraparound
+    dphi = jnp.where(dphi > jnp.pi, dphi - 2*jnp.pi, dphi)
+    dphi = jnp.where(dphi < -jnp.pi, dphi + 2*jnp.pi, dphi)
+    
+    # Normalize to [0, 1] fractional coordinates within pixel
+    # Use a smooth approximation for differentiability
+    delta_u = jnp.clip(0.5 + dtheta / pixel_size, 0.0, 1.0 - 1e-7)
+    delta_v = jnp.clip(0.5 + dphi / pixel_size, 0.0, 1.0 - 1e-7)
+    
+    # Create 4 neighbor pixels by using small angular offsets
+    # This is a simplified approach - we create neighbors by shifting theta/phi
+    offset = pixel_size * 0.25  # Quarter pixel offset
+    
+    # Define the 4 corners relative to host pixel
+    theta_neighbors = jnp.array([
+        theta_host - offset,  # SW
+        theta_host - offset,  # SE
+        theta_host + offset,  # NW
+        theta_host + offset   # NE
+    ])
+    
+    phi_neighbors = jnp.array([
+        phi_host - offset,  # SW
+        phi_host + offset,  # SE
+        phi_host - offset,  # NW
+        phi_host + offset   # NE
+    ])
+    
+    # Convert neighbor coordinates to pixel indices
+    # Clamp theta to valid range
+    theta_neighbors = jnp.clip(theta_neighbors, 1e-8, jnp.pi - 1e-8)
+    
+    # Get pixel indices for each neighbor (broadcasting over particles)
+    pixel_indices = jnp.array([
+        jhp.ang2pix(nside, theta_neighbors[i], phi_neighbors[i]) 
+        for i in range(4)
+    ])
+    
+    # Compute CIC weights for the 4 corners
+    # Order: SW, SE, NW, NE
+    weights = jnp.array([
+        (1 - delta_u) * (1 - delta_v),  # SW
+        (1 - delta_u) * delta_v,        # SE  
+        delta_u * (1 - delta_v),        # NW
+        delta_u * delta_v               # NE
+    ])
+    
+    return pixel_indices, weights
 
+
+def paint_particles_spherical_cic(positions,
+                                  nside,
+                                  observer_position,
+                                  R_min,
+                                  R_max,
+                                  box_size,
+                                  mesh_shape,
+                                  weights=None):
+    """
+    Paint particles onto HEALPix spherical maps using differentiable CIC scheme.
+    
+    This implements the Cloud-in-Cell (CIC) mass-assignment scheme for spherical
+    coordinates, making it differentiable unlike the NGP scheme.
+    
     Parameters
     ----------
     positions : ndarray, shape (..., 3)
@@ -27,7 +113,7 @@ def paint_particles_spherical(positions,
     nside : int
         HEALPix nside parameter
     observer_position : ndarray, shape (3,)
-        Observer position in comoving  coordinates
+        Observer position in comoving coordinates
     R_min, R_max : float
         Minimum and maximum comoving distance range to include
     box_size : float
@@ -36,26 +122,104 @@ def paint_particles_spherical(positions,
         Shape of the simulation mesh (nx, ny, nz)
     weights : ndarray, optional
         Particle weights (default: uniform weights)
-
+        
     Returns
     -------
     healpix_map : ndarray
         HEALPix density map
     """
-    # Check resolution warning
-    res_deg = jhp.nside2resol(nside, arcmin=True) / 60
-    box_diagonal = jnp.sqrt(sum([bs**2 for bs in box_size]))
-    typical_angular_scale = jnp.degrees(jnp.arctan(min(box_size) / box_diagonal))
+    if weights is None:
+        weights = jnp.ones(positions.shape[:-1])
     
-    #if res_deg > typical_angular_scale:
-    #    jax.debug.print(
-    #        "WARNING: HEALPix resolution ({res_deg} deg) is larger than typical box angular scale ({typical_angular_scale:} deg). "
-    #        "Consider decreasing nside from {nside} or increasing box size. "
-    #        "Current box size: {box_size}, nside resolution: {res_deg*60:.2f} arcmin" , res_deg=res_deg,
-    #        typical_angular_scale=typical_angular_scale,
-    #        nside=nside, box_size=box_size
-    #    )
+    # Convert particle positions to physical coordinates
+    positions = positions * jnp.array(box_size) / jnp.array(mesh_shape)
     
+    # Compute relative positions from observer
+    rel_positions = positions - jnp.asarray(observer_position)
+    
+    # Convert to spherical coordinates
+    x, y, z = rel_positions[..., 0], rel_positions[..., 1], rel_positions[..., 2]
+    
+    # Comoving distance from observer
+    r = jnp.sqrt(x**2 + y**2 + z**2)
+    
+    # Apply distance cuts
+    distance_mask = (r >= R_min) & (r <= R_max)
+    
+    # Compute angular coordinates
+    theta = jnp.arccos(jnp.clip(z / (r + 1e-10), -1, 1))
+    phi = jnp.arctan2(y, x)
+    
+    # Apply distance mask to weights
+    masked_weights = (weights * distance_mask).flatten()
+    
+    # Get CIC weights for each particle
+    pixel_indices, cic_weights = _healpix_cic_weights(nside, theta.flatten(), phi.flatten())
+    
+    # Initialize HEALPix map
+    npix = jhp.nside2npix(nside)
+    healpix_map = jnp.zeros(npix)
+    
+    # Apply CIC weights to each of the 4 neighbors
+    for i in range(4):
+        # Get pixel indices and weights for this neighbor
+        pix_idx = pixel_indices[i]  # Shape: (N,)
+        cic_weight = cic_weights[i]  # Shape: (N,)
+        
+        # Combine distance mask and CIC weights
+        combined_weights = masked_weights * cic_weight
+        
+        # Add contributions using scatter_add for differentiability
+        healpix_map = healpix_map.at[pix_idx].add(combined_weights)
+    
+    # Calculate volume per pixel in spherical shell
+    pixel_solid_angle = 4 * jnp.pi / npix  # steradians per pixel
+    R_center = 0.5 * (R_min + R_max)
+    shell_thickness = R_max - R_min
+    shell_volume_per_pixel = pixel_solid_angle * R_center**2 * shell_thickness
+    
+    # Convert particle counts to density (particles per unit volume)
+    healpix_map = healpix_map / shell_volume_per_pixel
+    
+    return healpix_map
+
+
+def paint_particles_spherical_ngp(positions,
+                              nside,
+                              observer_position,
+                              R_min,
+                              R_max,
+                              box_size,
+                              mesh_shape,
+                              weights=None):
+    """
+    Paint particles onto HEALPix spherical maps using Nearest Grid Point (NGP) scheme.
+    
+    This is a non-differentiable method that assigns particles to the nearest pixel.
+    
+    Parameters
+    ----------
+    positions : ndarray, shape (..., 3)
+        Particle positions in simulation coordinates
+    nside : int
+        HEALPix nside parameter
+    observer_position : ndarray, shape (3,)
+        Observer position in comoving coordinates
+    R_min, R_max : float
+        Minimum and maximum comoving distance range to include
+    box_size : float
+        Size of the simulation box in physical units
+    mesh_shape : tuple
+        Shape of the simulation mesh (nx, ny, nz)
+    weights : ndarray, optional
+        Particle weights (default: uniform weights)
+        
+    Returns
+    -------
+    healpix_map : ndarray
+        HEALPix density map
+    """
+    # Original NGP implementation
     if weights is None:
         weights = jnp.ones(positions.shape[:-1])
 
@@ -67,8 +231,7 @@ def paint_particles_spherical(positions,
     rel_positions = positions - jnp.asarray(observer_position)
 
     # Convert to spherical coordinates
-    x, y, z = rel_positions[..., 0], rel_positions[..., 1], rel_positions[...,
-                                                                          2]
+    x, y, z = rel_positions[..., 0], rel_positions[..., 1], rel_positions[..., 2]
 
     # Comoving distance from observer
     r = jnp.sqrt(x**2 + y**2 + z**2)
@@ -102,52 +265,86 @@ def paint_particles_spherical(positions,
 
     return healpix_map
 
+@partial(jax.jit, static_argnames=('nside', 'mesh_shape', 'box_size', 'method'))
+def paint_particles_spherical(positions,
+                              nside,
+                              observer_position,
+                              R_min,
+                              R_max,
+                              box_size,
+                              mesh_shape,
+                              weights=None,
+                              method='cic'):
+    """
+    Directly bin particles onto HEALPix spherical maps without intermediate
+    3D Cartesian mesh. This avoids double binning artifacts.
 
-@partial(jax.jit,
-         static_argnames=('nside', 'fov', 'center_radec', 'd_R', 'box_size'))
-def paint_spherical(volume, nside, fov, center_radec, observer_position,
-                    box_size, R, d_R):
-    width, height, depth = volume.shape
-    ra0, dec0 = center_radec
-    fov_width, fov_height = fov
+    Parameters
+    ----------
+    positions : ndarray, shape (..., 3)
+        Particle positions in simulation coordinates
+    nside : int
+        HEALPix nside parameter
+    observer_position : ndarray, shape (3,)
+        Observer position in comoving  coordinates
+    R_min, R_max : float
+        Minimum and maximum comoving distance range to include
+    box_size : float
+        Size of the simulation box in physical units
+    mesh_shape : tuple
+        Shape of the simulation mesh (nx, ny, nz)
+    weights : ndarray, optional
+        Particle weights (default: uniform weights)
+    method : str, optional
+        Painting method: 'cic' for Cloud-in-Cell (differentiable) or 'ngp' for 
+        Nearest Grid Point (non-differentiable). Default is 'cic'.
 
-    pixel_scale_x = fov_width / width
-    pixel_scale_y = fov_height / height
-
-    res_deg = jhp.nside2resol(nside, arcmin=True) / 60
-    if pixel_scale_x > res_deg or pixel_scale_y > res_deg:
-        print(
-            f"WARNING Pixel scale ({pixel_scale_x:.4f} deg, {pixel_scale_y:.4f} deg) is larger than the Healpy resolution ({res_deg:.4f} deg). Increase the field of view or decrease the nside."
-        )
-
-    y_idx, x_idx = jnp.indices((height, width))
-    ra_grid = ra0 + x_idx * pixel_scale_x
-    dec_grid = dec0 + y_idx * pixel_scale_y
-
-    ra_flat = ra_grid.flatten() * jnp.pi / 180.0
-    dec_flat = dec_grid.flatten() * jnp.pi / 180.0
-    R_s = jnp.arange(0, d_R, 1.0) + R
-
-    XYZ = R_s.reshape(-1, 1, 1) * jhp.ang2vec(ra_flat, dec_flat, lonlat=False)
-    observer_position = jnp.array(observer_position)
-    # Convert observer position from box units to grid units
-    observer_position = observer_position / jnp.array(box_size) * jnp.array(
-        volume.shape)
-
-    coords = XYZ + jnp.asarray(observer_position)[jnp.newaxis, jnp.newaxis, :]
-
-    pixels = jhp.ang2pix(nside, ra_flat, dec_flat, lonlat=False)
-
-    npix = jhp.nside2npix(nside)
-
-    @partial(jax.vmap, in_axes=(0, None, None))
-    def interpolate_volume(coords, volume, pixels):
-        voxels = jax.scipy.ndimage.map_coordinates(volume, coords.T, order=1)
-        sums = jnp.bincount(pixels, weights=voxels, length=npix)
-        return sums
-
-    sum_map = interpolate_volume(coords, volume, pixels).sum(axis=0)
-    counts = jnp.bincount(pixels, length=npix)
-    sum_map = jnp.where(counts > 0, sum_map / counts, jhp.UNSEEN)
-
-    return sum_map
+    Returns
+    -------
+    healpix_map : ndarray
+        HEALPix density map
+    """        
+    # Check particle density warning
+    total_particles = jnp.prod(jnp.array(positions.shape[:-1]))  # Total number of particles
+    npix = jhp.nside2npix(nside)  # Total HEALPix pixels
+    
+    # Estimate fraction of particles in the shell
+    # Approximate shell volume vs box volume
+    box_diagonal = jnp.sqrt(jnp.sum(jnp.array(box_size)**2))
+    max_distance = box_diagonal / 2  # Maximum possible distance from center
+    shell_volume_fraction = ((R_max**3 - R_min**3) / 3) / (max_distance**3 / 3)
+    shell_volume_fraction = jnp.minimum(shell_volume_fraction, 1.0)  # Cap at 1.0
+    
+    estimated_particles_in_shell = total_particles * shell_volume_fraction
+    particles_per_pixel = estimated_particles_in_shell / npix
+    
+    # Warn if particles per pixel is too low (threshold: 1 particle per pixel)
+    min_particles_per_pixel = 1.0
+    jax.lax.cond(particles_per_pixel < min_particles_per_pixel,
+        lambda: jax.debug.print(
+            "WARNING: Low particle density detected! "
+            "Estimated {particles_per_pixel} particles per pixel (threshold: {min_threshold}). "
+            "This may result in shot noise and low statistical power. "
+            "Consider: increasing mesh resolution, decreasing nside from {nside}, or using a thicker shell. "
+            "Total particles: {total_particles}, Shell fraction: {shell_fraction}, Pixels: {npix}",
+            particles_per_pixel=particles_per_pixel,
+            min_threshold=min_particles_per_pixel,
+            nside=nside,
+            total_particles=total_particles,
+            shell_fraction=shell_volume_fraction,
+            npix=npix
+        ),
+        lambda: None
+    )
+    
+    # Choose method
+    if method.upper() == 'CIC':
+        return paint_particles_spherical_cic(
+            positions, nside, observer_position, R_min, R_max, 
+            box_size, mesh_shape, weights)
+    elif method.upper() == 'NGP':
+        return paint_particles_spherical_ngp(
+            positions, nside, observer_position, R_min, R_max, 
+            box_size, mesh_shape, weights)
+    else:
+        raise ValueError(f"Unknown method '{method}'. Choose 'cic' or 'ngp'.")
