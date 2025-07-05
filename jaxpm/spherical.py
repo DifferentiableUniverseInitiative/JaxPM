@@ -70,13 +70,5 @@ def paint_particles_spherical(positions,
     npix = jhp.nside2npix(nside)
     healpix_map = jnp.bincount(pixels, weights=masked_weights, length=npix)
     
-    # Calculate volume per pixel in spherical shell
-    pixel_solid_angle = 4 * jnp.pi / npix  # steradians per pixel
-    R_center = 0.5 * (R_min + R_max)
-    shell_thickness = R_max - R_min
-    shell_volume_per_pixel = pixel_solid_angle * R_center**2 * shell_thickness
-
-    # Convert particle counts to density (particles per unit volume)
-    healpix_map = healpix_map / shell_volume_per_pixel
 
     return healpix_map
