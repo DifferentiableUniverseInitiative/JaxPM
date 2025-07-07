@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-import jax_cosmo
 import jax_cosmo as jc
 import jax_cosmo.constants as constants
 from jax.scipy.ndimage import map_coordinates
@@ -123,7 +122,7 @@ def convergence_Born(cosmo, density_planes, r, a, z_source, d_r,
         Convergence map
     """
     # Constants
-    constant_factor = 3 / 2 * cosmo.Omega_m * (constants.H0 / constants.c)**2
+    constant_factor = 3 / 2 * cosmo.Omega_m * (constants.H0 * cosmo.h / constants.c)**2
     chi_s = jc.background.radial_comoving_distance(cosmo, jc.utils.z2a(z_source)) 
     n_planes = len(r)
     
@@ -144,6 +143,7 @@ def convergence_Born(cosmo, density_planes, r, a, z_source, d_r,
         # The simulation density should be normalized to the mean density
         rho_mean = jnp.mean(rho)
         delta = rho / rho_mean - 1
+        #delta /= 0.7**2
  
         # Multiply by dχ * χ / a(χ) 
         chi = r[i]
