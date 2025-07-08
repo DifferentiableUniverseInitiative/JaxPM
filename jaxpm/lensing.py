@@ -122,7 +122,7 @@ def convergence_Born(cosmo, density_planes, r, a, z_source, d_r,
         Convergence map
     """
     # Constants
-    constant_factor = 3 / 2 * cosmo.Omega_m * (constants.H0 * cosmo.h / constants.c)**2
+    constant_factor = 3 / 2 * cosmo.Omega_m * (constants.H0 / constants.c)**2
     chi_s = jc.background.radial_comoving_distance(cosmo, jc.utils.z2a(z_source)) 
     n_planes = len(r)
     
