@@ -8,7 +8,7 @@ import jax_healpy as jhp
 Array = jnp.ndarray
 
 
-@partial(jax.jit, static_argnames=("nside",))
+@partial(jax.jit, static_argnames=("nside", ))
 def paint_particles_spherical_ngp(
     positions: Array,
     nside: int,
@@ -21,9 +21,9 @@ def paint_particles_spherical_ngp(
 ) -> Array:
     """
     Paint particles onto HEALPix spherical maps using Nearest Grid Point (NGP) scheme.
-    
+
     This is a fast method that assigns particles to the nearest pixel.
-    
+
     Parameters
     ----------
     positions : ndarray, shape (..., 3)
@@ -40,7 +40,7 @@ def paint_particles_spherical_ngp(
         Shape of the simulation mesh (nx, ny, nz)
     weights : ndarray, optional
         Particle weights (default: uniform weights)
-        
+
     Returns
     -------
     healpix_map : ndarray
@@ -92,7 +92,7 @@ def paint_particles_spherical_ngp(
     return healpix_map / shell_volume_per_pixel
 
 
-@partial(jax.jit, static_argnames=("nside",))
+@partial(jax.jit, static_argnames=("nside", ))
 def paint_particles_spherical_bilinear(
     positions: Array,
     nside: int,
@@ -105,10 +105,10 @@ def paint_particles_spherical_bilinear(
 ) -> Array:
     """
     Paint particles onto HEALPix spherical maps using bilinear interpolation.
-    
+
     This implements bilinear interpolation using jax_healpy.get_interp_weights()
     to distribute each particle's contribution among its 4 nearest pixels.
-    
+
     Parameters
     ----------
     positions : ndarray, shape (..., 3)
@@ -125,7 +125,7 @@ def paint_particles_spherical_bilinear(
         Shape of the simulation mesh (nx, ny, nz)
     weights : ndarray, optional
         Particle weights (default: uniform weights)
-        
+
     Returns
     -------
     healpix_map : ndarray
@@ -166,13 +166,13 @@ def paint_particles_spherical_bilinear(
     pixels, interp_weights = jhp.get_interp_weights(nside, theta, phi)
     # check if normalized
     weight_sums = jnp.sum(interp_weights, axis=0)
-    norm_bool =  jnp.allclose(weight_sums, 1.0)
+    norm_bool = jnp.allclose(weight_sums, 1.0)
 
     # Initialize HEALPix map
     npix = jhp.nside2npix(nside)
     healpix_map = jnp.zeros(npix)
 
-    contributions = interp_weights * masked_weights[None , :]
+    contributions = interp_weights * masked_weights[None, :]
     # Calculate contributions for each of the 4 nearest pixels
     healpix_map = healpix_map.at[pixels].add(contributions)
 
@@ -182,7 +182,7 @@ def paint_particles_spherical_bilinear(
     return healpix_map / shell_vol_per_pix
 
 
-@partial(jax.jit, static_argnames=("nside",))
+@partial(jax.jit, static_argnames=("nside", ))
 def paint_particles_spherical_rbf_neighbor(
     positions: Array,
     nside: int,
@@ -196,10 +196,10 @@ def paint_particles_spherical_rbf_neighbor(
 ) -> Array:
     """
     Paint particles onto HEALPix spherical maps using RBF with fixed neighbor stencil.
-    
-    This implements a Gaussian RBF kernel using a fixed stencil of 9 pixels 
+
+    This implements a Gaussian RBF kernel using a fixed stencil of 9 pixels
     (central pixel + 8 neighbors) per particle for predictable performance.
-    
+
     Parameters
     ----------
     positions : ndarray, shape (..., 3)
@@ -218,7 +218,7 @@ def paint_particles_spherical_rbf_neighbor(
         Particle weights (default: uniform weights)
     sigma_fixed : float
         Fixed smoothing width parameter
-        
+
     Returns
     -------
     healpix_map : ndarray
@@ -256,7 +256,11 @@ def paint_particles_spherical_rbf_neighbor(
     theta, phi = jhp.vec2ang(unit_vecs)
 
     # Get 9-pixel stencils: center + 8 neighbors
-    pix9 = jhp.get_all_neighbours(nside, theta, phi, nest=False, get_center=True)
+    pix9 = jhp.get_all_neighbours(nside,
+                                  theta,
+                                  phi,
+                                  nest=False,
+                                  get_center=True)
 
     # Get unit vectors for all 9 pixels
     flat_pix = pix9.reshape(-1)
@@ -268,7 +272,8 @@ def paint_particles_spherical_rbf_neighbor(
     gamma = jnp.arccos(jnp.clip(dots, -1.0, 1.0))
 
     # Gaussian kernel weights
-    kernel_weights = jnp.exp(-(gamma**2) / (2 * sigma_fixed**2)) / (2 * jnp.pi * sigma_fixed**2)
+    kernel_weights = jnp.exp(
+        -(gamma**2) / (2 * sigma_fixed**2)) / (2 * jnp.pi * sigma_fixed**2)
     # Check if kernel weights are normalized per particle
     weight_sums = jnp.sum(kernel_weights, axis=0)
     norm_bool = jnp.allclose(weight_sums, 1.0)
@@ -279,15 +284,14 @@ def paint_particles_spherical_rbf_neighbor(
     weight_sum = jnp.sum(kernel_weights_masked, axis=0)
     # Safe normalization: if no valid neighbors, keep zeros
     norm_kernel = jnp.where(weight_sum[None, :] > 0.0,
-                            kernel_weights_masked / weight_sum[None, :],
-                            0.0)
+                            kernel_weights_masked / weight_sum[None, :], 0.0)
     # Check normalization again
     norm_sums = jnp.sum(norm_kernel, axis=0)
     norm_bool2 = jnp.allclose(norm_sums, 1.0)
 
     # Initialize HEALPix map size
     npix = jhp.nside2npix(nside)
-    
+
     # Weight by particle weight; kernel sums to 1 per particle
     pixel_area = 4.0 * jnp.pi / npix
     contrib = norm_kernel * masked_weights[None, :]
@@ -306,7 +310,10 @@ def paint_particles_spherical_rbf_neighbor(
     return healpix_map / shell_vol_per_pix
 
 
-@partial(jax.jit, static_argnames=("nside", "method", "udgrade_order_in", "udgrade_order_out", "udgrade_power", "udgrade_pess" , "paint_nside"))
+@partial(jax.jit,
+         static_argnames=("nside", "method", "udgrade_order_in",
+                          "udgrade_order_out", "udgrade_power", "udgrade_pess",
+                          "paint_nside"))
 def paint_particles_spherical(
     positions: Array,
     nside: int,
@@ -327,10 +334,10 @@ def paint_particles_spherical(
 ) -> Array:
     """
     High-level spherical painter: select method and optionally paint at higher resolution.
-    
+
     This function dispatches to one of the three fast painting methods and optionally
     paints at higher resolution before downgrading to the target resolution.
-    
+
     Parameters
     ----------
     positions : ndarray, shape (..., 3)
@@ -361,17 +368,18 @@ def paint_particles_spherical(
         Output pixel ordering for udgrade
     udgrade_pess : bool
         Pessimistic flag for udgrade
-        
+
     Returns
     -------
     healpix_map : ndarray
         HEALPix density map at resolution nside
     """
     method_upper = method.strip().upper()
-    
+
     # Determine internal nside for painting
-    internal_nside = int(paint_nside) if paint_nside is not None else int(nside)
-    
+    internal_nside = int(paint_nside) if paint_nside is not None else int(
+        nside)
+
     # Select appropriate painter
     if method_upper == "NGP":
         map_hi = paint_particles_spherical_ngp(
@@ -411,7 +419,7 @@ def paint_particles_spherical(
         raise ValueError(
             f"Unknown method '{method}'. Choose 'ngp', 'bilinear', or 'rbf_neighbor'."
         )
-    
+
     # If internal resolution differs from target, up/down-grade
     if internal_nside != int(nside):
         return jhp.udgrade(
@@ -422,5 +430,5 @@ def paint_particles_spherical(
             order_out=udgrade_order_out,
             power=udgrade_power,
         )
-    
+
     return map_hi

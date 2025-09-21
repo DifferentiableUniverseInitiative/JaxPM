@@ -13,25 +13,25 @@ Markers: single_device
 """
 
 import os
+
 os.environ.setdefault("JAX_PLATFORM_NAME", "cpu")
 
 import sys
 from pathlib import Path
-import numpy as np
-import pytest
+
 import healpy as hp
 import jax
 import jax.numpy as jnp
 import jax_cosmo as jc
+import numpy as np
+import pytest
 from jax.tree_util import register_pytree_node_class
 from jax_cosmo.redshift import redshift_distribution
 
-from jaxpm.pm import linear_field, pm_forces
-from jaxpm.growth import growth_factor as jpm_growth_factor
 from jaxpm.distributed import fft3d
+from jaxpm.growth import growth_factor as jpm_growth_factor
+from jaxpm.pm import linear_field, lpt, pm_forces
 from jaxpm.spherical import paint_particles_spherical
-from jaxpm.pm import linear_field, lpt
-
 
 # ----------------------
 # Fixed configuration
@@ -64,14 +64,17 @@ def positions_lpt():
 
     # Create cosmology and power spectrum
     k = jnp.logspace(-4, 1, 128)
-    pk = jc.power.linear_matter_power(jc.Planck15(Omega_c=OMEGA_C, sigma8=SIGMA_8), k)
+    pk = jc.power.linear_matter_power(
+        jc.Planck15(Omega_c=OMEGA_C, sigma8=SIGMA_8), k)
     pk_fn = lambda x: jnp.interp(x.reshape([-1]), k, pk).reshape(x.shape)
 
     # Generate initial conditions
     initial_conditions = linear_field(MESH_SHAPE, BOX_SIZE, pk_fn, seed=key)
 
     # Create particle grid
-    particles = jnp.stack(jnp.meshgrid(*[jnp.arange(s) for s in MESH_SHAPE], indexing="ij"), axis=-1)
+    particles = jnp.stack(jnp.meshgrid(*[jnp.arange(s) for s in MESH_SHAPE],
+                                       indexing="ij"),
+                          axis=-1)
 
     # Apply LPT
     cosmo = jc.Planck15(Omega_c=OMEGA_C, sigma8=SIGMA_8)
@@ -89,6 +92,7 @@ def theory_curves():
 
     @register_pytree_node_class
     class tophat_z(redshift_distribution):
+
         def pz_fn(self, z):
             zmin, zmax = self.params
             return jnp.where((z >= zmin) & (z <= zmax), 1.0, 0.0)
@@ -106,7 +110,9 @@ def theory_curves():
     probe = jc.probes.NumberCounts([nz], bias, has_rsd=False)
 
     ell = jnp.arange(0, LMAX + 1)
-    cl_th = jc.angular_cl.angular_cl(cosmo, ell, [probe], nonlinear_fn=jc.power.linear).squeeze()
+    cl_th = jc.angular_cl.angular_cl(cosmo,
+                                     ell, [probe],
+                                     nonlinear_fn=jc.power.linear).squeeze()
 
     # Slice to ℓ>=2
     ell_th = np.array(ell[2:])
@@ -114,7 +120,7 @@ def theory_curves():
 
     # Pixel window correction for autospectra
     w = hp.pixwin(NSIDE, lmax=LMAX)
-    cl_th_pix = cl_th * (np.asarray(w[2:]) ** 2)
+    cl_th_pix = cl_th * (np.asarray(w[2:])**2)
 
     return ell_th, cl_th, cl_th_pix
 
@@ -144,17 +150,35 @@ def ngp_reference(positions_lpt):
 # Single comprehensive test
 # ----------------------
 
+
 @pytest.mark.single_device
-def test_mass_and_spectra_against_theory(positions_lpt, theory_curves, ngp_reference):
+def test_mass_and_spectra_against_theory(positions_lpt, theory_curves,
+                                         ngp_reference):
     ell_th, cl_th, cl_th_pix = theory_curves
 
     # Five methods under test (NGP is the reference for mass)
     methods = {
-        "Bilinear": {"method": "bilinear"},
-        "RBF Neighbors": {"method": "RBF_NEIGHBOR"},
-        "NGP + Udgrade": {"method": "ngp", "paint_nside": PAINT_NSIDE, "udgrade_power": 0.0},
-        "Bilinear + Udgrade": {"method": "bilinear", "paint_nside": PAINT_NSIDE, "udgrade_power": 0.0},
-        "RBF + Udgrade": {"method": "RBF_NEIGHBOR", "paint_nside": PAINT_NSIDE, "udgrade_power": 0.0},
+        "Bilinear": {
+            "method": "bilinear"
+        },
+        "RBF Neighbors": {
+            "method": "RBF_NEIGHBOR"
+        },
+        "NGP + Udgrade": {
+            "method": "ngp",
+            "paint_nside": PAINT_NSIDE,
+            "udgrade_power": 0.0
+        },
+        "Bilinear + Udgrade": {
+            "method": "bilinear",
+            "paint_nside": PAINT_NSIDE,
+            "udgrade_power": 0.0
+        },
+        "RBF + Udgrade": {
+            "method": "RBF_NEIGHBOR",
+            "paint_nside": PAINT_NSIDE,
+            "udgrade_power": 0.0
+        },
     }
 
     # Low-ℓ relaxed region and per-method ℓ_max windows (absolute ℓ for NSIDE=256)
@@ -167,7 +191,7 @@ def test_mass_and_spectra_against_theory(positions_lpt, theory_curves, ngp_refer
         "Bilinear + Udgrade": 300,
         "RBF + Udgrade": 300,
     }
-    
+
     # Prepare common ell grid for data (ℓ>=2)
     ell_data_full = np.arange(LMAX + 1)
     ell_data = ell_data_full[2:]
@@ -186,13 +210,17 @@ def test_mass_and_spectra_against_theory(positions_lpt, theory_curves, ngp_refer
             R_max=R_MAX,
             box_size=BOX_SIZE,
             mesh_shape=MESH_SHAPE,
-            **{k: v for k, v in cfg.items() if k != "method"},
+            **{
+                k: v
+                for k, v in cfg.items() if k != "method"
+            },
         )
         raw_np = np.asarray(raw_map)
 
         # 1) Mass conservation vs NGP
         cur_sum = float(np.sum(raw_np))
-        rel_diff = abs(cur_sum - mass_ref) / (mass_ref if mass_ref != 0 else 1.0)
+        rel_diff = abs(cur_sum -
+                       mass_ref) / (mass_ref if mass_ref != 0 else 1.0)
         assert np.isfinite(cur_sum)
         assert rel_diff <= 1e-3, f"Mass not conserved for {name}: rel_diff={rel_diff:.3e}"
         print(f"Mass conserved for {name}: rel_diff={rel_diff:.3e}")
@@ -216,8 +244,11 @@ def test_mass_and_spectra_against_theory(positions_lpt, theory_curves, ngp_refer
             r_lo = r[lo_mask]
             assert np.all(np.isfinite(r_lo)), f"NaNs at low-ℓ for {name}"
             # Relaxed but robust bounds to avoid flakiness from Limber/variance
-            assert np.all((r_lo >= 0.2) & (r_lo <= 1.2)), f"Low-ℓ ratios out of bounds for {name}"
-            print(f"Low-ℓ ratios within bounds for {name} within [{r_lo.min():.2f}, {r_lo.max():.2f}]")
+            assert np.all((r_lo >= 0.2) & (
+                r_lo <= 1.2)), f"Low-ℓ ratios out of bounds for {name}"
+            print(
+                f"Low-ℓ ratios within bounds for {name} within [{r_lo.min():.2f}, {r_lo.max():.2f}]"
+            )
 
         # Main window checks (method-specific ℓ range)
         ell_max = L_WINDOWS[name]
@@ -225,5 +256,8 @@ def test_mass_and_spectra_against_theory(positions_lpt, theory_curves, ngp_refer
         r_main = r[main_mask]
         assert r_main.size > 10, f"Insufficient ℓ coverage in main window for {name}"
         assert np.all(np.isfinite(r_main)), f"NaNs in main window for {name}"
-        print(f"Main window ratios within bounds for {name} within [{r_main.min():.2f}, {r_main.max():.2f}]")
-        assert np.all((r_main >= 0.5) & (r_main <= 1.55)), f"Ratios out of bounds in main window for {name}"
+        print(
+            f"Main window ratios within bounds for {name} within [{r_main.min():.2f}, {r_main.max():.2f}]"
+        )
+        assert np.all((r_main >= 0.5) & (
+            r_main <= 1.55)), f"Ratios out of bounds in main window for {name}"
