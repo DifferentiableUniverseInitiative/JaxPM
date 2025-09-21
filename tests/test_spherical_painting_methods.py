@@ -50,6 +50,34 @@ OMEGA_C = 0.25
 SIGMA_8 = 0.8
 RANDOM_SEED = 42
 
+# ----------------------
+# Method configurations for parametrized tests
+# ----------------------
+
+# All 6 painting method configurations (3 base + 3 udgrade)
+PAINTING_METHODS = [
+    ("ngp", {}),
+    ("bilinear", {}),
+    ("RBF_NEIGHBOR", {}),
+    ("ngp", {"paint_nside": PAINT_NSIDE, "udgrade_power": 0.0}),
+    ("bilinear", {"paint_nside": PAINT_NSIDE, "udgrade_power": 0.0}),
+    ("RBF_NEIGHBOR", {"paint_nside": PAINT_NSIDE, "udgrade_power": 0.0}),
+]
+
+# Methods expected to be differentiable (4 smooth methods)
+DIFFERENTIABLE_METHODS = [
+    ("bilinear", {}),
+    ("RBF_NEIGHBOR", {}),
+    ("bilinear", {"paint_nside": PAINT_NSIDE, "udgrade_power": 0.0}),
+    ("RBF_NEIGHBOR", {"paint_nside": PAINT_NSIDE, "udgrade_power": 0.0}),
+]
+
+# NGP methods (expected to have zero gradients)
+NGP_METHODS = [
+    ("ngp", {}),
+    ("ngp", {"paint_nside": PAINT_NSIDE, "udgrade_power": 0.0}),
+]
+
 
 # ----------------------
 # Fixtures
@@ -261,3 +289,144 @@ def test_mass_and_spectra_against_theory(positions_lpt, theory_curves,
         )
         assert np.all((r_main >= 0.5) & (
             r_main <= 1.55)), f"Ratios out of bounds in main window for {name}"
+
+
+@pytest.mark.single_device
+@pytest.mark.parametrize("method,kwargs", DIFFERENTIABLE_METHODS)
+def test_spherical_painting_differentiability(positions_lpt, method, kwargs):
+    """Test differentiability properties of individual spherical painting methods.
+
+    Tests that smooth methods (bilinear, RBF) have non-zero gradients w.r.t. input parameters.
+    """
+    print(f" Testing differentiability for {method} method...")
+
+    # Define a simple forward model: positions -> painted map -> observable
+    def forward_model(positions_scaled):
+        """Forward model: scaled positions -> painted map -> simple observable."""
+        # Paint particles using specified method
+        painted_map = paint_particles_spherical(
+            positions_scaled,
+            method=method,
+            nside=NSIDE,
+            observer_position=OBSERVER_POSITION,
+            R_min=R_MIN,
+            R_max=R_MAX,
+            box_size=BOX_SIZE,
+            mesh_shape=MESH_SHAPE,
+            **kwargs
+        )
+
+        # Compute simple but differentiable observable: map variance
+        mean_density = jnp.mean(painted_map)
+        overdensity = jnp.where(mean_density > 0, painted_map / mean_density - 1.0, 0.0)
+        observable = jnp.var(overdensity)
+
+        return observable
+
+    # Test scaling parameter (simple perturbation to positions)
+    scaling_factor = 1.1  # 10% perturbation
+
+    # Compute gradients w.r.t. position scaling
+    def scaled_forward_model(scale_factor):
+        scaled_positions = positions_lpt * scale_factor
+        return forward_model(scaled_positions)
+
+    grad_fn = jax.grad(scaled_forward_model)
+
+    # Compute gradient
+    gradient = grad_fn(scaling_factor)
+
+    # Check gradients are finite
+    assert jnp.isfinite(gradient), f"Non-finite gradient for {method}"
+    print(f"   Gradient w.r.t. scaling: {gradient:.6e}")
+
+    # Smooth methods should have non-trivial gradients
+    grad_magnitude = jnp.abs(gradient)
+    assert grad_magnitude > 1e-8, f"Gradients too small for differentiable method {method}: {grad_magnitude:.2e}"
+    print(f"   ✅ Non-zero gradients detected (magnitude: {grad_magnitude:.2e})")
+
+
+@pytest.mark.single_device
+@pytest.mark.parametrize("method,kwargs", NGP_METHODS)
+def test_ngp_zero_gradients(positions_lpt, method, kwargs):
+    """Test that NGP methods have zero gradients (discrete assignment)."""
+    print(f" Testing zero gradients for {method} method...")
+
+    # Define a simple forward model: positions -> painted map -> observable
+    def forward_model(positions_scaled):
+        """Forward model: scaled positions -> painted map -> simple observable."""
+        # Paint particles using specified method
+        painted_map = paint_particles_spherical(
+            positions_scaled,
+            method=method,
+            nside=NSIDE,
+            observer_position=OBSERVER_POSITION,
+            R_min=R_MIN,
+            R_max=R_MAX,
+            box_size=BOX_SIZE,
+            mesh_shape=MESH_SHAPE,
+            **kwargs
+        )
+
+        # Compute simple but differentiable observable: map variance
+        mean_density = jnp.mean(painted_map)
+        overdensity = jnp.where(mean_density > 0, painted_map / mean_density - 1.0, 0.0)
+        observable = jnp.var(overdensity)
+
+        return observable
+
+    # Test scaling parameter (simple perturbation to positions)
+    scaling_factor = 1.1  # 10% perturbation
+
+    # Compute gradients w.r.t. position scaling
+    def scaled_forward_model(scale_factor):
+        scaled_positions = positions_lpt * scale_factor
+        return forward_model(scaled_positions)
+
+    grad_fn = jax.grad(scaled_forward_model)
+
+    # Compute gradient
+    gradient = grad_fn(scaling_factor)
+
+    # Check gradients are finite
+    assert jnp.isfinite(gradient), f"Non-finite gradient for {method}"
+    print(f"   Gradient w.r.t. scaling: {gradient:.6e}")
+
+    # NGP should have zero gradients (discrete assignment)
+    grad_magnitude = jnp.abs(gradient)
+    assert grad_magnitude == 0.0, f"Non-zero gradient for non-differentiable method {method}: {grad_magnitude:.2e}"
+    print(f"   ✅ Zero gradients confirmed (magnitude: {grad_magnitude:.2e})")
+
+
+@pytest.mark.single_device
+@pytest.mark.parametrize("method,kwargs", PAINTING_METHODS)
+def test_painting_method_jit_compilation(positions_lpt, method, kwargs):
+    """Test that individual painting methods compile correctly under JIT."""
+    print(f" Testing JIT compilation for {method} method...")
+
+    def paint_with_jit(positions):
+        """JIT-compiled painting function."""
+        return paint_particles_spherical(
+            positions,
+            method=method,
+            nside=NSIDE,
+            observer_position=OBSERVER_POSITION,
+            R_min=R_MIN,
+            R_max=R_MAX,
+            box_size=BOX_SIZE,
+            mesh_shape=MESH_SHAPE,
+            **kwargs
+        )
+
+    # JIT compile the function
+    jit_paint_fn = jax.jit(paint_with_jit)
+
+    # Test that it works
+    painted_map = jit_paint_fn(positions_lpt).block_until_ready()
+
+    # Basic sanity checks
+    assert painted_map.shape == (hp.nside2npix(NSIDE),), f"Wrong output shape for {method}"
+    assert jnp.all(jnp.isfinite(painted_map)), f"Non-finite values in output for {method}"
+    assert jnp.sum(painted_map) > 0, f"Zero total mass for {method}"
+
+    print(f"   ✅ {method} JIT compilation successful")
