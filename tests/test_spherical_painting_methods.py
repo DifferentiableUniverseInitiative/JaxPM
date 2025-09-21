@@ -59,23 +59,41 @@ PAINTING_METHODS = [
     ("ngp", {}),
     ("bilinear", {}),
     ("RBF_NEIGHBOR", {}),
-    ("ngp", {"paint_nside": PAINT_NSIDE, "udgrade_power": 0.0}),
-    ("bilinear", {"paint_nside": PAINT_NSIDE, "udgrade_power": 0.0}),
-    ("RBF_NEIGHBOR", {"paint_nside": PAINT_NSIDE, "udgrade_power": 0.0}),
+    ("ngp", {
+        "paint_nside": PAINT_NSIDE,
+        "udgrade_power": 0.0
+    }),
+    ("bilinear", {
+        "paint_nside": PAINT_NSIDE,
+        "udgrade_power": 0.0
+    }),
+    ("RBF_NEIGHBOR", {
+        "paint_nside": PAINT_NSIDE,
+        "udgrade_power": 0.0
+    }),
 ]
 
 # Methods expected to be differentiable (4 smooth methods)
 DIFFERENTIABLE_METHODS = [
     ("bilinear", {}),
     ("RBF_NEIGHBOR", {}),
-    ("bilinear", {"paint_nside": PAINT_NSIDE, "udgrade_power": 0.0}),
-    ("RBF_NEIGHBOR", {"paint_nside": PAINT_NSIDE, "udgrade_power": 0.0}),
+    ("bilinear", {
+        "paint_nside": PAINT_NSIDE,
+        "udgrade_power": 0.0
+    }),
+    ("RBF_NEIGHBOR", {
+        "paint_nside": PAINT_NSIDE,
+        "udgrade_power": 0.0
+    }),
 ]
 
 # NGP methods (expected to have zero gradients)
 NGP_METHODS = [
     ("ngp", {}),
-    ("ngp", {"paint_nside": PAINT_NSIDE, "udgrade_power": 0.0}),
+    ("ngp", {
+        "paint_nside": PAINT_NSIDE,
+        "udgrade_power": 0.0
+    }),
 ]
 
 
@@ -313,12 +331,12 @@ def test_spherical_painting_differentiability(positions_lpt, method, kwargs):
             R_max=R_MAX,
             box_size=BOX_SIZE,
             mesh_shape=MESH_SHAPE,
-            **kwargs
-        )
+            **kwargs)
 
         # Compute simple but differentiable observable: map variance
         mean_density = jnp.mean(painted_map)
-        overdensity = jnp.where(mean_density > 0, painted_map / mean_density - 1.0, 0.0)
+        overdensity = jnp.where(mean_density > 0,
+                                painted_map / mean_density - 1.0, 0.0)
         observable = jnp.var(overdensity)
 
         return observable
@@ -343,7 +361,8 @@ def test_spherical_painting_differentiability(positions_lpt, method, kwargs):
     # Smooth methods should have non-trivial gradients
     grad_magnitude = jnp.abs(gradient)
     assert grad_magnitude > 1e-8, f"Gradients too small for differentiable method {method}: {grad_magnitude:.2e}"
-    print(f"   ✅ Non-zero gradients detected (magnitude: {grad_magnitude:.2e})")
+    print(
+        f"   ✅ Non-zero gradients detected (magnitude: {grad_magnitude:.2e})")
 
 
 @pytest.mark.single_device
@@ -365,12 +384,12 @@ def test_ngp_zero_gradients(positions_lpt, method, kwargs):
             R_max=R_MAX,
             box_size=BOX_SIZE,
             mesh_shape=MESH_SHAPE,
-            **kwargs
-        )
+            **kwargs)
 
         # Compute simple but differentiable observable: map variance
         mean_density = jnp.mean(painted_map)
-        overdensity = jnp.where(mean_density > 0, painted_map / mean_density - 1.0, 0.0)
+        overdensity = jnp.where(mean_density > 0,
+                                painted_map / mean_density - 1.0, 0.0)
         observable = jnp.var(overdensity)
 
         return observable
@@ -406,17 +425,15 @@ def test_painting_method_jit_compilation(positions_lpt, method, kwargs):
 
     def paint_with_jit(positions):
         """JIT-compiled painting function."""
-        return paint_particles_spherical(
-            positions,
-            method=method,
-            nside=NSIDE,
-            observer_position=OBSERVER_POSITION,
-            R_min=R_MIN,
-            R_max=R_MAX,
-            box_size=BOX_SIZE,
-            mesh_shape=MESH_SHAPE,
-            **kwargs
-        )
+        return paint_particles_spherical(positions,
+                                         method=method,
+                                         nside=NSIDE,
+                                         observer_position=OBSERVER_POSITION,
+                                         R_min=R_MIN,
+                                         R_max=R_MAX,
+                                         box_size=BOX_SIZE,
+                                         mesh_shape=MESH_SHAPE,
+                                         **kwargs)
 
     # JIT compile the function
     jit_paint_fn = jax.jit(paint_with_jit)
@@ -425,8 +442,10 @@ def test_painting_method_jit_compilation(positions_lpt, method, kwargs):
     painted_map = jit_paint_fn(positions_lpt).block_until_ready()
 
     # Basic sanity checks
-    assert painted_map.shape == (hp.nside2npix(NSIDE),), f"Wrong output shape for {method}"
-    assert jnp.all(jnp.isfinite(painted_map)), f"Non-finite values in output for {method}"
+    assert painted_map.shape == (
+        hp.nside2npix(NSIDE), ), f"Wrong output shape for {method}"
+    assert jnp.all(
+        jnp.isfinite(painted_map)), f"Non-finite values in output for {method}"
     assert jnp.sum(painted_map) > 0, f"Zero total mass for {method}"
 
     print(f"   ✅ {method} JIT compilation successful")
