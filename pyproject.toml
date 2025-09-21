@@ -11,8 +11,12 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 urls = { "Homepage" = "https://github.com/DifferentiableUniverseInitiative/JaxPM" }
-dependencies = ["jax_cosmo", "jax>=0.4.35", "jaxdecomp>=0.2.3"]
-
+dependencies = [
+  "jax_cosmo",
+  "jax>=0.4.35",
+  "jaxdecomp>=0.2.3",
+  "jax-healpy @ git+https://github.com/CMBSciPol/jax-healpy@main"
+]
 [tool.setuptools]
 packages = ["jaxpm"]
 
