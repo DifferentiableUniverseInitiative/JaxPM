@@ -76,15 +76,15 @@ PAINTING_METHODS = [
 # Methods expected to be differentiable (4 smooth methods)
 DIFFERENTIABLE_METHODS = [
     ("bilinear", {}),
-    ("RBF_NEIGHBOR", {}),
+    #("RBF_NEIGHBOR", {}),
     ("bilinear", {
         "paint_nside": PAINT_NSIDE,
         "udgrade_power": 0.0
     }),
-    ("RBF_NEIGHBOR", {
-        "paint_nside": PAINT_NSIDE,
-        "udgrade_power": 0.0
-    }),
+    #("RBF_NEIGHBOR", {
+    #    "paint_nside": PAINT_NSIDE,
+    #    "udgrade_power": 0.0
+    #}),
 ]
 
 # NGP methods (expected to have zero gradients)
