@@ -164,9 +164,6 @@ def paint_particles_spherical_bilinear(
 
     # Get bilinear interpolation weights and pixel indices
     pixels, interp_weights = jhp.get_interp_weights(nside, theta, phi)
-    # check if normalized
-    weight_sums = jnp.sum(interp_weights, axis=0)
-    norm_bool = jnp.allclose(weight_sums, 1.0)
 
     # Initialize HEALPix map
     npix = jhp.nside2npix(nside)
@@ -274,9 +271,6 @@ def paint_particles_spherical_rbf_neighbor(
     # Gaussian kernel weights
     kernel_weights = jnp.exp(
         -(gamma**2) / (2 * sigma_fixed**2)) / (2 * jnp.pi * sigma_fixed**2)
-    # Check if kernel weights are normalized per particle
-    weight_sums = jnp.sum(kernel_weights, axis=0)
-    norm_bool = jnp.allclose(weight_sums, 1.0)
 
     # Mask invalid neighbors (pix == -1) and renormalize per particle to conserve mass
     valid_mask = (pix9 != -1)
@@ -285,9 +279,6 @@ def paint_particles_spherical_rbf_neighbor(
     # Safe normalization: if no valid neighbors, keep zeros
     norm_kernel = jnp.where(weight_sum[None, :] > 0.0,
                             kernel_weights_masked / weight_sum[None, :], 0.0)
-    # Check normalization again
-    norm_sums = jnp.sum(norm_kernel, axis=0)
-    norm_bool2 = jnp.allclose(norm_sums, 1.0)
 
     # Initialize HEALPix map size
     npix = jhp.nside2npix(nside)
