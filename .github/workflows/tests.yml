@@ -65,7 +65,7 @@ jobs:
     - name: Run Single Device Tests
       run: |
         cd tests
-        pytest -v -m "not distributed"
+        pytest -v -s -m "not distributed"
 
     - name: Run Distributed tests
       run: |
