@@ -345,7 +345,7 @@ def paint_particles_spherical(
         Shape of the simulation mesh (nx, ny, nz)
     weights : ndarray, optional
         Particle weights (default: uniform weights)
-    method : str
+    method (case-insensitive): str
         Painting method: 'ngp', 'bilinear', or 'rbf_neighbor'
     sigma_fixed : float
         Fixed smoothing width parameter for RBF method
