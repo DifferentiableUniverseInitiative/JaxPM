@@ -3,3 +3,4 @@ pmesh @ git+https://github.com/MP-Gadget/pmesh
 fastpm @ git+https://github.com/ASKabalan/fastpm-python
 numpy==2.2.6
 diffrax
+glass[examples]
