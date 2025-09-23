@@ -13,7 +13,7 @@ def paint_particles_spherical(positions,
                               weights=None):
     """
     Paint particles onto HEALPix spherical maps using Nearest Grid Point (NGP) scheme.
-    
+
     Parameters
     ----------
     positions : ndarray, shape (..., 3)
@@ -30,7 +30,7 @@ def paint_particles_spherical(positions,
         Shape of the simulation mesh (nx, ny, nz)
     weights : ndarray, optional
         Particle weights (default: uniform weights)
-        
+
     Returns
     -------
     healpix_map : ndarray
@@ -47,7 +47,8 @@ def paint_particles_spherical(positions,
     rel_positions = positions - jnp.asarray(observer_position)
 
     # Convert to spherical coordinates
-    x, y, z = rel_positions[..., 0], rel_positions[..., 1], rel_positions[..., 2]
+    x, y, z = rel_positions[..., 0], rel_positions[..., 1], rel_positions[...,
+                                                                          2]
 
     # Comoving distance from observer
     r = jnp.sqrt(x**2 + y**2 + z**2)
@@ -71,7 +72,7 @@ def paint_particles_spherical(positions,
     healpix_map = jnp.bincount(pixels, weights=masked_weights, length=npix)
 
     # Calculate the volume of the spherical shell
-    shell_volume = 4/3 * jnp.pi * (R_max**3 - R_min**3)
+    shell_volume = 4 / 3 * jnp.pi * (R_max**3 - R_min**3)
 
     # Calculate the volume per pixel
     pixel_volume = shell_volume / npix

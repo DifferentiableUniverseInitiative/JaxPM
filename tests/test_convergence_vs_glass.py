@@ -1,23 +1,26 @@
-import numpy as np
-import pytest
+import os
+from functools import partial
+
+import camb
+# Glass and CAMB imports
+import glass
+import healpy as hp
 import jax
 import jax.numpy as jnp
 import jax_cosmo as jc
-import healpy as hp
+import numpy as np
+import pytest
+from cosmology.compat.camb import Cosmology
+from diffrax import (ConstantStepSize, ODETerm, SaveAt, SemiImplicitEuler,
+                     diffeqsolve)
 from numpy.testing import assert_allclose
-from functools import partial
-from diffrax import ODETerm, SaveAt, diffeqsolve, SemiImplicitEuler, ConstantStepSize
-import os
+
+from jaxpm.kernels import interpolate_power_spectrum
+from jaxpm.lensing import convergence_Born, spherical_density_fn
+from jaxpm.ode import symplectic_ode
 # JaxPM imports
 from jaxpm.pm import linear_field, lpt
-from jaxpm.ode import symplectic_ode
-from jaxpm.lensing import spherical_density_fn, convergence_Born
-from jaxpm.kernels import interpolate_power_spectrum
 
-# Glass and CAMB imports
-import glass
-import camb
-from cosmology.compat.camb import Cosmology
 os.environ["JC_CACHE"] = "off"
 
 
@@ -270,7 +273,8 @@ def glass_triangular_maps(nbody_density_planes, cosmo_fixture,
 
 
 @pytest.fixture(scope="module")
-def glass_tophat_maps(nbody_density_planes, cosmo_fixture, convergence_test_config):
+def glass_tophat_maps(nbody_density_planes, cosmo_fixture,
+                      convergence_test_config):
     """Compute Glass convergence with top-hat windows"""
     cosmo = cosmo_fixture
     config = convergence_test_config
@@ -379,20 +383,17 @@ def compute_map_statistics(map1, map2):
     rmse = np.sqrt(mse)
     correlation = np.corrcoef(map1_clean, map2_clean)[0, 1]
 
-    return {
-        'mse': mse,
-        'rmse': rmse,
-        'correlation': correlation
-    }
+    return {'mse': mse, 'rmse': rmse, 'correlation': correlation}
 
 
 def compute_power_spectrum(convergence_map, nside):
     """Compute angular power spectrum (Cl) from HEALPix convergence map"""
     # Ensure map is properly masked and finite
-    convergence_clean = np.where(np.isfinite(convergence_map), convergence_map, 0.0)
+    convergence_clean = np.where(np.isfinite(convergence_map), convergence_map,
+                                 0.0)
 
     # Compute power spectrum using HEALPix
-    cl = hp.anafast(convergence_clean, lmax=2*nside)
+    cl = hp.anafast(convergence_clean, lmax=2 * nside)
     ell = np.arange(len(cl))
 
     return ell, cl
@@ -405,7 +406,8 @@ def compute_cl_statistics(cl1, cl2, low_ell_cutoff=2):
     cl2_cut = cl2[low_ell_cutoff:]
 
     # Remove zeros and negative values for ratio calculation
-    valid_mask = (cl1_cut > 0) & (cl2_cut > 0) & np.isfinite(cl1_cut) & np.isfinite(cl2_cut)
+    valid_mask = (cl1_cut > 0) & (
+        cl2_cut > 0) & np.isfinite(cl1_cut) & np.isfinite(cl2_cut)
     cl1_valid = cl1_cut[valid_mask]
     cl2_valid = cl2_cut[valid_mask]
 
@@ -432,15 +434,19 @@ def compute_cl_statistics(cl1, cl2, low_ell_cutoff=2):
 
 
 @pytest.mark.single_device
-def test_convergence_maps_jaxpm_vs_glass_triangular(jaxpm_convergence_maps, glass_triangular_maps, convergence_test_config):
+def test_convergence_maps_jaxpm_vs_glass_triangular(jaxpm_convergence_maps,
+                                                    glass_triangular_maps,
+                                                    convergence_test_config):
     """Test convergence maps: JaxPM vs Glass triangular windows"""
     convergence_jaxpm, z_sources_jaxpm = jaxpm_convergence_maps
     convergence_triangular, z_sources_triangular = glass_triangular_maps
     config = convergence_test_config
 
     # Ensure redshift arrays match
-    assert np.array_equal(z_sources_jaxpm, z_sources_triangular), "Redshift arrays must match"
-    assert len(z_sources_jaxpm) == len(config['z_sources']), "Must have all requested redshifts"
+    assert np.array_equal(z_sources_jaxpm,
+                          z_sources_triangular), "Redshift arrays must match"
+    assert len(z_sources_jaxpm) == len(
+        config['z_sources']), "Must have all requested redshifts"
 
     # Test each redshift
     for i, z in enumerate(z_sources_jaxpm):
@@ -451,30 +457,38 @@ def test_convergence_maps_jaxpm_vs_glass_triangular(jaxpm_convergence_maps, glas
         stats = compute_map_statistics(jaxpm_map, triangular_map)
 
         # Print metrics for debugging
-        print(f"z={z:.1f} - Map MSE: {stats['mse']:.6f}, RMSE: {stats['rmse']:.6f}, Correlation: {stats['correlation']:.4f}")
+        print(
+            f"z={z:.1f} - Map MSE: {stats['mse']:.6f}, RMSE: {stats['rmse']:.6f}, Correlation: {stats['correlation']:.4f}"
+        )
 
         # Validate maps are reasonable
         assert np.isfinite(stats['mse']), f"MSE must be finite for z={z}"
         assert np.isfinite(stats['rmse']), f"RMSE must be finite for z={z}"
-        assert np.isfinite(stats['correlation']), f"Correlation must be finite for z={z}"
+        assert np.isfinite(
+            stats['correlation']), f"Correlation must be finite for z={z}"
 
         # MSE should be reasonably small (non-regression test)
         assert stats['mse'] < 1e-3, f"MSE too large for z={z}: {stats['mse']}"
 
         # Correlation should be high
-        assert stats['correlation'] > 0.8, f"Correlation too low for z={z}: {stats['correlation']}"
+        assert stats[
+            'correlation'] > 0.8, f"Correlation too low for z={z}: {stats['correlation']}"
 
 
 @pytest.mark.single_device
-def test_convergence_maps_jaxpm_vs_glass_tophat(jaxpm_convergence_maps, glass_tophat_maps, convergence_test_config):
+def test_convergence_maps_jaxpm_vs_glass_tophat(jaxpm_convergence_maps,
+                                                glass_tophat_maps,
+                                                convergence_test_config):
     """Test convergence maps: JaxPM vs Glass top-hat windows (target 10% ratio)"""
     convergence_jaxpm, z_sources_jaxpm = jaxpm_convergence_maps
     convergence_tophat, z_sources_tophat = glass_tophat_maps
     config = convergence_test_config
 
     # Ensure redshift arrays match
-    assert np.array_equal(z_sources_jaxpm, z_sources_tophat), "Redshift arrays must match"
-    assert len(z_sources_jaxpm) == len(config['z_sources']), "Must have all requested redshifts"
+    assert np.array_equal(z_sources_jaxpm,
+                          z_sources_tophat), "Redshift arrays must match"
+    assert len(z_sources_jaxpm) == len(
+        config['z_sources']), "Must have all requested redshifts"
 
     # Test each redshift
     for i, z in enumerate(z_sources_jaxpm):
@@ -490,29 +504,37 @@ def test_convergence_maps_jaxpm_vs_glass_tophat(jaxpm_convergence_maps, glass_to
         amplitude_ratio = jaxpm_rms / tophat_rms if tophat_rms > 0 else np.inf
 
         # Print metrics for debugging
-        print(f"z={z:.1f} - Map MSE: {stats['mse']:.6f}, RMSE: {stats['rmse']:.6f}, Correlation: {stats['correlation']:.4f}, Amplitude ratio: {amplitude_ratio:.3f}")
+        print(
+            f"z={z:.1f} - Map MSE: {stats['mse']:.6f}, RMSE: {stats['rmse']:.6f}, Correlation: {stats['correlation']:.4f}, Amplitude ratio: {amplitude_ratio:.3f}"
+        )
 
         # Validate maps are reasonable
         assert np.isfinite(stats['mse']), f"MSE must be finite for z={z}"
-        assert np.isfinite(stats['correlation']), f"Correlation must be finite for z={z}"
-        assert np.isfinite(amplitude_ratio), f"Amplitude ratio must be finite for z={z}"
+        assert np.isfinite(
+            stats['correlation']), f"Correlation must be finite for z={z}"
+        assert np.isfinite(
+            amplitude_ratio), f"Amplitude ratio must be finite for z={z}"
 
         # JaxPM/top-hat ratio should be around 1.1 (10% higher)
         assert 0.9 < amplitude_ratio < 1.1, f"Amplitude ratio outside expected range for z={z}: {amplitude_ratio}"
 
         # Correlation should be reasonable
-        assert stats['correlation'] > 0.7, f"Correlation too low for z={z}: {stats['correlation']}"
+        assert stats[
+            'correlation'] > 0.7, f"Correlation too low for z={z}: {stats['correlation']}"
 
 
 @pytest.mark.single_device
-def test_power_spectrum_jaxpm_vs_glass_triangular(jaxpm_convergence_maps, glass_triangular_maps, convergence_test_config):
+def test_power_spectrum_jaxpm_vs_glass_triangular(jaxpm_convergence_maps,
+                                                  glass_triangular_maps,
+                                                  convergence_test_config):
     """Test power spectra (Cl): JaxPM vs Glass triangular windows"""
     convergence_jaxpm, z_sources_jaxpm = jaxpm_convergence_maps
     convergence_triangular, z_sources_triangular = glass_triangular_maps
     config = convergence_test_config
 
     # Ensure redshift arrays match
-    assert np.array_equal(z_sources_jaxpm, z_sources_triangular), "Redshift arrays must match"
+    assert np.array_equal(z_sources_jaxpm,
+                          z_sources_triangular), "Redshift arrays must match"
 
     # Test each redshift
     for i, z in enumerate(z_sources_jaxpm):
@@ -520,38 +542,50 @@ def test_power_spectrum_jaxpm_vs_glass_triangular(jaxpm_convergence_maps, glass_
         triangular_map = np.array(convergence_triangular[i])
 
         # Compute power spectra
-        ell_jaxpm, cl_jaxpm = compute_power_spectrum(jaxpm_map, config['nside'])
-        ell_triangular, cl_triangular = compute_power_spectrum(triangular_map, config['nside'])
+        ell_jaxpm, cl_jaxpm = compute_power_spectrum(jaxpm_map,
+                                                     config['nside'])
+        ell_triangular, cl_triangular = compute_power_spectrum(
+            triangular_map, config['nside'])
 
         # Ensure ell arrays match
-        assert np.array_equal(ell_jaxpm, ell_triangular), "Ell arrays must match"
+        assert np.array_equal(ell_jaxpm,
+                              ell_triangular), "Ell arrays must match"
 
         # Compute Cl statistics
-        cl_stats = compute_cl_statistics(cl_jaxpm, cl_triangular, config['low_ell_cutoff'])
+        cl_stats = compute_cl_statistics(cl_jaxpm, cl_triangular,
+                                         config['low_ell_cutoff'])
 
         # Print metrics for debugging
-        print(f"z={z:.1f} - Cl MSE: {cl_stats['mse']:.2e}, RMSE: {cl_stats['rmse']:.2e}, Correlation: {cl_stats['correlation']:.4f}")
+        print(
+            f"z={z:.1f} - Cl MSE: {cl_stats['mse']:.2e}, RMSE: {cl_stats['rmse']:.2e}, Correlation: {cl_stats['correlation']:.4f}"
+        )
 
         # Validate power spectra are reasonable
         assert np.isfinite(cl_stats['mse']), f"Cl MSE must be finite for z={z}"
-        assert np.isfinite(cl_stats['correlation']), f"Cl correlation must be finite for z={z}"
+        assert np.isfinite(cl_stats['correlation']
+                           ), f"Cl correlation must be finite for z={z}"
 
         # MSE should be reasonably small (non-regression test)
-        assert cl_stats['mse'] < 1e-8, f"Cl MSE too large for z={z}: {cl_stats['mse']}"
+        assert cl_stats[
+            'mse'] < 1e-8, f"Cl MSE too large for z={z}: {cl_stats['mse']}"
 
         # Correlation should be high
-        assert cl_stats['correlation'] > 0.9, f"Cl correlation too low for z={z}: {cl_stats['correlation']}"
+        assert cl_stats[
+            'correlation'] > 0.9, f"Cl correlation too low for z={z}: {cl_stats['correlation']}"
 
 
 @pytest.mark.single_device
-def test_power_spectrum_jaxpm_vs_glass_tophat(jaxpm_convergence_maps, glass_tophat_maps, convergence_test_config):
+def test_power_spectrum_jaxpm_vs_glass_tophat(jaxpm_convergence_maps,
+                                              glass_tophat_maps,
+                                              convergence_test_config):
     """Test power spectra (Cl): JaxPM vs Glass top-hat windows (target 10% ratio)"""
     convergence_jaxpm, z_sources_jaxpm = jaxpm_convergence_maps
     convergence_tophat, z_sources_tophat = glass_tophat_maps
     config = convergence_test_config
 
     # Ensure redshift arrays match
-    assert np.array_equal(z_sources_jaxpm, z_sources_tophat), "Redshift arrays must match"
+    assert np.array_equal(z_sources_jaxpm,
+                          z_sources_tophat), "Redshift arrays must match"
 
     # Test each redshift
     for i, z in enumerate(z_sources_jaxpm):
@@ -559,25 +593,34 @@ def test_power_spectrum_jaxpm_vs_glass_tophat(jaxpm_convergence_maps, glass_toph
         tophat_map = np.array(convergence_tophat[i])
 
         # Compute power spectra
-        ell_jaxpm, cl_jaxpm = compute_power_spectrum(jaxpm_map, config['nside'])
-        ell_tophat, cl_tophat = compute_power_spectrum(tophat_map, config['nside'])
+        ell_jaxpm, cl_jaxpm = compute_power_spectrum(jaxpm_map,
+                                                     config['nside'])
+        ell_tophat, cl_tophat = compute_power_spectrum(tophat_map,
+                                                       config['nside'])
 
         # Ensure ell arrays match
         assert np.array_equal(ell_jaxpm, ell_tophat), "Ell arrays must match"
 
         # Compute Cl statistics
-        cl_stats = compute_cl_statistics(cl_jaxpm, cl_tophat, config['low_ell_cutoff'])
+        cl_stats = compute_cl_statistics(cl_jaxpm, cl_tophat,
+                                         config['low_ell_cutoff'])
 
         # Print metrics for debugging
-        print(f"z={z:.1f} - Cl MSE: {cl_stats['mse']:.2e}, RMSE: {cl_stats['rmse']:.2e}, Mean ratio: {cl_stats['mean_ratio']:.3f}, Correlation: {cl_stats['correlation']:.4f}")
+        print(
+            f"z={z:.1f} - Cl MSE: {cl_stats['mse']:.2e}, RMSE: {cl_stats['rmse']:.2e}, Mean ratio: {cl_stats['mean_ratio']:.3f}, Correlation: {cl_stats['correlation']:.4f}"
+        )
 
         # Validate power spectra are reasonable
         assert np.isfinite(cl_stats['mse']), f"Cl MSE must be finite for z={z}"
-        assert np.isfinite(cl_stats['mean_ratio']), f"Cl mean ratio must be finite for z={z}"
-        assert np.isfinite(cl_stats['correlation']), f"Cl correlation must be finite for z={z}"
+        assert np.isfinite(
+            cl_stats['mean_ratio']), f"Cl mean ratio must be finite for z={z}"
+        assert np.isfinite(cl_stats['correlation']
+                           ), f"Cl correlation must be finite for z={z}"
 
         # JaxPM/top-hat Cl ratio should be around 1.1 (10% higher)
-        assert 0.9 < cl_stats['mean_ratio'] < 1.1, f"Cl mean ratio outside expected range for z={z}: {cl_stats['mean_ratio']}"
+        assert 0.9 < cl_stats[
+            'mean_ratio'] < 1.1, f"Cl mean ratio outside expected range for z={z}: {cl_stats['mean_ratio']}"
 
         # Correlation should be high
-        assert cl_stats['correlation'] > 0.9, f"Cl correlation too low for z={z}: {cl_stats['correlation']}"
+        assert cl_stats[
+            'correlation'] > 0.9, f"Cl correlation too low for z={z}: {cl_stats['correlation']}"
