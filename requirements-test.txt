@@ -4,3 +4,4 @@ fastpm @ git+https://github.com/ASKabalan/fastpm-python
 numpy==2.2.6
 diffrax
 glass[examples]
+cosmology.compat.camb
