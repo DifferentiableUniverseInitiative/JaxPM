@@ -54,22 +54,22 @@ RANDOM_SEED = 42
 # Method configurations for parametrized tests
 # ----------------------
 
-# All 6 painting method configurations (3 base + 3 udgrade)
+# All 6 painting method configurations (3 base + 3 ud_grade)
 PAINTING_METHODS = [
     ("ngp", {}),
     ("bilinear", {}),
     ("RBF_NEIGHBOR", {}),
     ("ngp", {
         "paint_nside": PAINT_NSIDE,
-        "udgrade_power": 0.0
+        "ud_grade_power": 0.0
     }),
     ("bilinear", {
         "paint_nside": PAINT_NSIDE,
-        "udgrade_power": 0.0
+        "ud_grade_power": 0.0
     }),
     ("RBF_NEIGHBOR", {
         "paint_nside": PAINT_NSIDE,
-        "udgrade_power": 0.0
+        "ud_grade_power": 0.0
     }),
 ]
 
@@ -79,11 +79,11 @@ DIFFERENTIABLE_METHODS = [
     #("RBF_NEIGHBOR", {}),
     ("bilinear", {
         "paint_nside": PAINT_NSIDE,
-        "udgrade_power": 0.0
+        "ud_grade_power": 0.0
     }),
     #("RBF_NEIGHBOR", {
     #    "paint_nside": PAINT_NSIDE,
-    #    "udgrade_power": 0.0
+    #    "ud_grade_power": 0.0
     #}),
 ]
 
@@ -92,7 +92,7 @@ NGP_METHODS = [
     ("ngp", {}),
     ("ngp", {
         "paint_nside": PAINT_NSIDE,
-        "udgrade_power": 0.0
+        "ud_grade_power": 0.0
     }),
 ]
 
@@ -210,20 +210,20 @@ def test_mass_and_spectra_against_theory(positions_lpt, theory_curves,
         "RBF Neighbors": {
             "method": "RBF_NEIGHBOR"
         },
-        "NGP + Udgrade": {
+        "NGP + ud_grade": {
             "method": "ngp",
             "paint_nside": PAINT_NSIDE,
-            "udgrade_power": 0.0
+            "ud_grade_power": 0.0
         },
-        "Bilinear + Udgrade": {
+        "Bilinear + ud_grade": {
             "method": "bilinear",
             "paint_nside": PAINT_NSIDE,
-            "udgrade_power": 0.0
+            "ud_grade_power": 0.0
         },
-        "RBF + Udgrade": {
+        "RBF + ud_grade": {
             "method": "RBF_NEIGHBOR",
             "paint_nside": PAINT_NSIDE,
-            "udgrade_power": 0.0
+            "ud_grade_power": 0.0
         },
     }
 
@@ -233,9 +233,9 @@ def test_mass_and_spectra_against_theory(positions_lpt, theory_curves,
         # Method-specific main-band limits from the test plan
         "Bilinear": 260,
         "RBF Neighbors": 180,
-        "NGP + Udgrade": 300,
-        "Bilinear + Udgrade": 300,
-        "RBF + Udgrade": 300,
+        "NGP + ud_grade": 300,
+        "Bilinear + ud_grade": 300,
+        "RBF + ud_grade": 300,
     }
 
     # Prepare common ell grid for data (ℓ>=2)
