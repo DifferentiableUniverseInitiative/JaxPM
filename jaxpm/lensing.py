@@ -158,7 +158,10 @@ def convergence_Born(cosmo,
     # Calculate mean density across spatial dimensions for each plane
     mean_axes = tuple(range(1, density_planes.ndim))
     rho_mean = jnp.mean(density_planes, axis=mean_axes, keepdims=True)
-    delta = density_planes / rho_mean - 1
+    # Avoid division by zero by adding a small epsilon where mean density is zero
+    eps = jnp.finfo(rho_mean.dtype).eps
+    safe_rho_mean = jnp.where(rho_mean == 0, eps, rho_mean)
+    delta = density_planes / safe_rho_mean - 1
 
     # --- 3. Vectorized Lensing Kernel and Weighting ---
     # Combine all factors except interpolation
