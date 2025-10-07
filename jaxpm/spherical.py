@@ -233,7 +233,8 @@ def paint_particles_spherical_rbf_neighbor(
         weights = jnp.ones(positions.shape[:-1])
 
     if kernel_width_arcmin is not None:
-        smoothing_rad = jnp.asarray(kernel_width_arcmin) * (jnp.pi / 180.0) / 60.0
+        smoothing_rad = jnp.asarray(kernel_width_arcmin) * (jnp.pi /
+                                                            180.0) / 60.0
 
         if smoothing_interpretation == "fwhm":
             sigma = smoothing_rad / 2.355
@@ -294,8 +295,8 @@ def paint_particles_spherical_rbf_neighbor(
     gamma = jnp.arccos(jnp.clip(dots, -1.0, 1.0))
 
     # Gaussian kernel weights
-    kernel_weights = jnp.exp(
-        -(gamma**2) / (2 * sigma**2)) / (2 * jnp.pi * sigma**2)
+    kernel_weights = jnp.exp(-(gamma**2) /
+                             (2 * sigma**2)) / (2 * jnp.pi * sigma**2)
 
     # Mask invalid neighbors (pix == -1) and renormalize per particle to conserve mass
     valid_mask = (pix9 != -1)
@@ -328,8 +329,9 @@ def paint_particles_spherical_rbf_neighbor(
 
 @partial(jax.jit,
          static_argnames=("nside", "method", "ud_grade_order_in",
-                          "ud_grade_order_out", "ud_grade_power", "ud_grade_pess",
-                          "paint_nside", "smoothing_interpretation"))
+                          "ud_grade_order_out", "ud_grade_power",
+                          "ud_grade_pess", "paint_nside",
+                          "smoothing_interpretation"))
 def paint_particles_spherical(
     positions: Array,
     nside: int,
