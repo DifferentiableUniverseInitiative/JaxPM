@@ -57,8 +57,9 @@ def paint_particles_spherical(positions,
     distance_mask = (r >= R_min) & (r <= R_max)
 
     # Compute angular coordinates (theta, phi in spherical coordinates)
-    # theta = polar angle from z-axis, phi = azimuthal angle
-    theta = jnp.arccos(jnp.clip(z / (r + 1e-10), -1, 1))
+    # theta = polar angle from z-axis, phi = azimuthal
+    eps = jnp.finfo(r.dtype).eps
+    theta = jnp.arccos(jnp.clip(z / (r + eps), -1, 1))
     phi = jnp.arctan2(y, x)
 
     # Convert to HEALPix pixel indices
