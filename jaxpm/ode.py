@@ -22,8 +22,7 @@ def symplectic_fpm_ode(mesh_shape,
         ac = (t0 * t1)**0.5  # Geometric mean of t0 and t1
         af = t1
 
-        #drift_contr = (Gp(cosmo, af) - Gp(cosmo, ai)) / gp(cosmo, ac)
-        drift_contr = (af - ai) / ac
+        drift_contr = (Gp(cosmo, af) - Gp(cosmo, ai)) / gp(cosmo, ac)
         # Computes the update of position (drift)
         dpos = 1 / (ac**3 * E(cosmo, ac)) * vel
 
@@ -55,11 +54,9 @@ def symplectic_fpm_ode(mesh_shape,
         # Computes the update of velocity (kick)
         dvel = 1.0 / (ac**2 * E(cosmo, ac)) * forces
         # First kick control factor
-        kick_factor_1 = (t1 - t0t1) / t1
-        #kick_factor_1 = (Gf(cosmo, t1) - Gf(cosmo, t0t1)) / dGfa(cosmo, t1)
+        kick_factor_1 = (Gf(cosmo, t1) - Gf(cosmo, t0t1)) / dGfa(cosmo, t1)
         # Second kick control factor
-        kick_factor_2 = (t2 - t1t2) / t2
-        #kick_factor_2 = (Gf(cosmo, t1t2) - Gf(cosmo, t1)) / dGfa(cosmo, t1)
+        kick_factor_2 = (Gf(cosmo, t1t2) - Gf(cosmo, t1)) / dGfa(cosmo, t1)
 
         return dvel * ((kick_factor_1 + kick_factor_2) / dt0)
 
