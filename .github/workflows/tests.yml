@@ -53,10 +53,10 @@ jobs:
         pip install jax
         # Install build dependencies
         pip install setuptools cython mpi4py
-        # Install test requirements with no-build-isolation for faster builds
+        # Install test requirements with no-build-isolation for PFFT
         pip install -r requirements-test.txt --no-build-isolation
         # Install additional test dependencies
-        pip install pytest diffrax
+        pip install pytest diffrax 'glass[examples] @ git+https://github.com/glass-dev/glass'
         # Install package in development mode
         pip install -e .
         echo "numpy version installed:"
