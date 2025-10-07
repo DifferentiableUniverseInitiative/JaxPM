@@ -74,6 +74,9 @@ def spherical_density_fn(mesh_shape,
 
         # Calculate comoving distance range for this shell
         r_center = jc.background.radial_comoving_distance(cosmo, t)
+        # Clear workspace to avoid memory issues
+        # due to the caching system in jax-cosmo
+        cosmo._workspace = {}
         r_max = jnp.clip(r_center + d_R / 2, 0, box_size[2])
         r_min = jnp.clip(r_center - d_R / 2, 0, box_size[2])
 

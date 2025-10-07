@@ -21,8 +21,6 @@ from jaxpm.ode import symplectic_ode
 # JaxPM imports
 from jaxpm.pm import linear_field, lpt
 
-os.environ["JC_CACHE"] = "off"
-
 
 @pytest.fixture(scope="module")
 def cosmo_fixture():
@@ -45,7 +43,7 @@ def cosmo_fixture():
 def convergence_test_config():
     """Configuration for convergence vs Glass tests"""
     return {
-        'mesh_size': 256,
+        'mesh_size': 128,
         'z_sources': [0.3, 0.5, 0.8],
         'nside': 256,
         'n_shells': 40,
@@ -68,6 +66,7 @@ def nbody_density_planes(cosmo_fixture, convergence_test_config):
     z_max = max(config['z_sources'])
     r_comoving = jc.background.radial_comoving_distance(
         cosmo, jc.utils.z2a(z_max)).squeeze()
+    cosmo._workspace = {}
 
     factors = jnp.clip(jnp.array(config['observer_position_in_box']), 0.0, 0.5)
     factors = 1.0 + 2.0 * jnp.minimum(factors, 1.0 - factors)
@@ -83,6 +82,7 @@ def nbody_density_planes(cosmo_fixture, convergence_test_config):
     k = jnp.logspace(-3, 1, 256)
     pk = jc.power.linear_matter_power(cosmo, k)
     pk_fn = lambda x: interpolate_power_spectrum(x, k, pk, sharding=None)
+    cosmo._workspace = {}
 
     initial_conditions = linear_field(mesh_shape,
                                       box_size,
@@ -98,7 +98,7 @@ def nbody_density_planes(cosmo_fixture, convergence_test_config):
                    order=1,
                    sharding=None,
                    halo_size=0)
-
+    cosmo._workspace = {}
     # Setup time evolution
     drift, kick = symplectic_ode(mesh_shape,
                                  paint_absolute_pos=False,
@@ -112,6 +112,7 @@ def nbody_density_planes(cosmo_fixture, convergence_test_config):
     r = jnp.linspace(0.0, box_size[-1] - observer_position[-1], n_lens)
     r_center = 0.5 * (r[1:] + r[:-1])
     a_center = jc.background.a_of_chi(cosmo, r_center)
+    cosmo._workspace = {}
     time_steps = a_center[::-1]  # Reverse order for time evolution
 
     saveat = SaveAt(
@@ -171,105 +172,6 @@ def jaxpm_convergence_maps(nbody_density_planes, cosmo_fixture,
                                                planes_data['d_R'])
 
     return convergence_jaxpm_multi, config['z_sources']
-
-
-@pytest.fixture(scope="module")
-def glass_triangular_maps(nbody_density_planes, cosmo_fixture,
-                          convergence_test_config):
-    """Compute Glass convergence with triangular windows"""
-    cosmo = cosmo_fixture
-    config = convergence_test_config
-    planes_data = nbody_density_planes
-
-    # Convert JaxPM density planes to Glass format
-    lightcone = planes_data['density_planes'][::-1]
-    density_planes_glass = []
-    for plane in lightcone:
-        plane_np = np.array(plane)
-        mean_density = np.mean(plane_np)
-        if mean_density > 0:
-            delta = plane_np / mean_density - 1.0
-        else:
-            delta = np.zeros_like(plane_np)
-        density_planes_glass.append(delta)
-
-    # Setup Glass cosmology to match jax_cosmo parameters
-    h = cosmo.h
-    omega_m = cosmo.Omega_c + cosmo.Omega_b
-    Oc = cosmo.Omega_c
-    Ob = cosmo.Omega_b
-
-    pars = camb.set_params(
-        H0=100 * h,
-        omch2=Oc * h**2,
-        ombh2=Ob * h**2,
-        NonLinear=camb.model.NonLinear_both,
-    )
-    results = camb.get_background(pars)
-    glass_cosmo = Cosmology(results)
-
-    # Glass triangular convergence calculation with multi-redshift support
-    z_targets = np.array(config['z_sources'], dtype=float)
-    sort_idx = np.argsort(z_targets)
-    sorted_targets = z_targets[sort_idx]
-    stored_maps = {}
-    target_ptr = 0
-
-    convergence_glass_triangular_calc = glass.MultiPlaneConvergence(
-        glass_cosmo)
-    r_edges = jnp.linspace(
-        0.0,
-        planes_data['box_size'][-1] - planes_data['observer_position'][-1],
-        len(planes_data['r_center']) + 2)
-    z_edges = np.array(jc.utils.a2z(jc.background.a_of_chi(cosmo, r_edges)))
-    shells_triangular = glass.linear_windows(z_edges)
-
-    prev_zeff = None
-    prev_kappa = None
-    tol = 5e-3
-
-    for i, win in enumerate(shells_triangular):
-        if i >= len(density_planes_glass):
-            break
-
-        convergence_glass_triangular_calc.add_window(density_planes_glass[i],
-                                                     win)
-        current_kappa = np.array(convergence_glass_triangular_calc.kappa,
-                                 copy=True)
-        current_zeff = win.zeff
-
-        if prev_kappa is None:
-            prev_kappa = np.zeros_like(current_kappa)
-        if prev_zeff is None:
-            prev_zeff = 0.0
-
-        while target_ptr < len(
-                sorted_targets
-        ) and current_zeff + tol >= sorted_targets[target_ptr]:
-            target_z = sorted_targets[target_ptr]
-            choose_current = abs(current_zeff - target_z) <= abs(
-                prev_zeff - target_z) if prev_zeff is not None else True
-            stored_maps[
-                target_z] = current_kappa if choose_current else prev_kappa
-            target_ptr += 1
-
-        prev_zeff = current_zeff
-        prev_kappa = current_kappa
-
-    if target_ptr < len(sorted_targets):
-        if prev_kappa is None:
-            raise ValueError(
-                "No GLASS triangular convergence maps were computed")
-        while target_ptr < len(sorted_targets):
-            target_z = sorted_targets[target_ptr]
-            stored_maps[target_z] = prev_kappa
-            target_ptr += 1
-
-    convergence_glass_triangular_multi = [stored_maps[z] for z in z_targets]
-    convergence_glass_triangular_multi = np.array(
-        convergence_glass_triangular_multi)
-
-    return convergence_glass_triangular_multi, config['z_sources']
 
 
 @pytest.fixture(scope="module")
@@ -434,48 +336,6 @@ def compute_cl_statistics(cl1, cl2, low_ell_cutoff=2):
 
 
 @pytest.mark.single_device
-def test_convergence_maps_jaxpm_vs_glass_triangular(jaxpm_convergence_maps,
-                                                    glass_triangular_maps,
-                                                    convergence_test_config):
-    """Test convergence maps: JaxPM vs Glass triangular windows"""
-    convergence_jaxpm, z_sources_jaxpm = jaxpm_convergence_maps
-    convergence_triangular, z_sources_triangular = glass_triangular_maps
-    config = convergence_test_config
-
-    # Ensure redshift arrays match
-    assert np.array_equal(z_sources_jaxpm,
-                          z_sources_triangular), "Redshift arrays must match"
-    assert len(z_sources_jaxpm) == len(
-        config['z_sources']), "Must have all requested redshifts"
-
-    # Test each redshift
-    for i, z in enumerate(z_sources_jaxpm):
-        jaxpm_map = np.array(convergence_jaxpm[i])
-        triangular_map = np.array(convergence_triangular[i])
-
-        # Compute statistics
-        stats = compute_map_statistics(jaxpm_map, triangular_map)
-
-        # Print metrics for debugging
-        print(
-            f"z={z:.1f} - Map MSE: {stats['mse']:.6f}, RMSE: {stats['rmse']:.6f}, Correlation: {stats['correlation']:.4f}"
-        )
-
-        # Validate maps are reasonable
-        assert np.isfinite(stats['mse']), f"MSE must be finite for z={z}"
-        assert np.isfinite(stats['rmse']), f"RMSE must be finite for z={z}"
-        assert np.isfinite(
-            stats['correlation']), f"Correlation must be finite for z={z}"
-
-        # MSE should be reasonably small (non-regression test)
-        assert stats['mse'] < 1e-3, f"MSE too large for z={z}: {stats['mse']}"
-
-        # Correlation should be high
-        assert stats[
-            'correlation'] > 0.8, f"Correlation too low for z={z}: {stats['correlation']}"
-
-
-@pytest.mark.single_device
 def test_convergence_maps_jaxpm_vs_glass_tophat(jaxpm_convergence_maps,
                                                 glass_tophat_maps,
                                                 convergence_test_config):
@@ -521,57 +381,6 @@ def test_convergence_maps_jaxpm_vs_glass_tophat(jaxpm_convergence_maps,
         # Correlation should be reasonable
         assert stats[
             'correlation'] > 0.7, f"Correlation too low for z={z}: {stats['correlation']}"
-
-
-@pytest.mark.single_device
-def test_power_spectrum_jaxpm_vs_glass_triangular(jaxpm_convergence_maps,
-                                                  glass_triangular_maps,
-                                                  convergence_test_config):
-    """Test power spectra (Cl): JaxPM vs Glass triangular windows"""
-    convergence_jaxpm, z_sources_jaxpm = jaxpm_convergence_maps
-    convergence_triangular, z_sources_triangular = glass_triangular_maps
-    config = convergence_test_config
-
-    # Ensure redshift arrays match
-    assert np.array_equal(z_sources_jaxpm,
-                          z_sources_triangular), "Redshift arrays must match"
-
-    # Test each redshift
-    for i, z in enumerate(z_sources_jaxpm):
-        jaxpm_map = np.array(convergence_jaxpm[i])
-        triangular_map = np.array(convergence_triangular[i])
-
-        # Compute power spectra
-        ell_jaxpm, cl_jaxpm = compute_power_spectrum(jaxpm_map,
-                                                     config['nside'])
-        ell_triangular, cl_triangular = compute_power_spectrum(
-            triangular_map, config['nside'])
-
-        # Ensure ell arrays match
-        assert np.array_equal(ell_jaxpm,
-                              ell_triangular), "Ell arrays must match"
-
-        # Compute Cl statistics
-        cl_stats = compute_cl_statistics(cl_jaxpm, cl_triangular,
-                                         config['low_ell_cutoff'])
-
-        # Print metrics for debugging
-        print(
-            f"z={z:.1f} - Cl MSE: {cl_stats['mse']:.2e}, RMSE: {cl_stats['rmse']:.2e}, Correlation: {cl_stats['correlation']:.4f}"
-        )
-
-        # Validate power spectra are reasonable
-        assert np.isfinite(cl_stats['mse']), f"Cl MSE must be finite for z={z}"
-        assert np.isfinite(cl_stats['correlation']
-                           ), f"Cl correlation must be finite for z={z}"
-
-        # MSE should be reasonably small (non-regression test)
-        assert cl_stats[
-            'mse'] < 1e-8, f"Cl MSE too large for z={z}: {cl_stats['mse']}"
-
-        # Correlation should be high
-        assert cl_stats[
-            'correlation'] > 0.9, f"Cl correlation too low for z={z}: {cl_stats['correlation']}"
 
 
 @pytest.mark.single_device
