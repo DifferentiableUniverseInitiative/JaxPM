@@ -179,7 +179,7 @@ def paint_particles_spherical_bilinear(
     return healpix_map / shell_vol_per_pix
 
 
-@partial(jax.jit, static_argnames=("nside", ))
+@partial(jax.jit, static_argnames=("nside", "smoothing_interpretation"))
 def paint_particles_spherical_rbf_neighbor(
     positions: Array,
     nside: int,
@@ -189,7 +189,8 @@ def paint_particles_spherical_rbf_neighbor(
     box_size: Union[float, Array, jnp.ndarray],
     mesh_shape: Tuple[int, int, int],
     weights: Optional[Array] = None,
-    sigma_fixed: float = 0.05,
+    kernel_width_arcmin: Optional[float] = None,
+    smoothing_interpretation: str = "fwhm",
 ) -> Array:
     """
     Paint particles onto HEALPix spherical maps using RBF with fixed neighbor stencil.
@@ -204,7 +205,7 @@ def paint_particles_spherical_rbf_neighbor(
     nside : int
         HEALPix nside parameter
     observer_position : ndarray, shape (3,)
-        Observer position in comoving coordinates
+        Observer position in comoving (MAKE SURE THAT IT WORKS IF NOT IN THE CENTER)
     R_min, R_max : float
         Minimum and maximum comoving distance range to include
     box_size : float or array
@@ -213,8 +214,15 @@ def paint_particles_spherical_rbf_neighbor(
         Shape of the simulation mesh (nx, ny, nz)
     weights : ndarray, optional
         Particle weights (default: uniform weights)
-    sigma_fixed : float
-        Fixed smoothing width parameter
+    kernel_width_arcmin : float
+        Width of the Gaussian smoothing kernel in arcminutes.
+        Larger values → more smoothing (blurrier maps).
+        Smaller values → less smoothing (sharper maps).
+    smoothing_interpretation : {"fwhm", "sigma", "2sigma"}
+        Interpretation of kernel_width_arcmin:
+        - 'fwhm': kernel_width_arcmin is the full-width at half-maximum
+        - 'sigma': kernel_width_arcmin is the standard deviation
+        - '2sigma': kernel_width_arcmin is 2× the standard deviation
 
     Returns
     -------
@@ -223,6 +231,23 @@ def paint_particles_spherical_rbf_neighbor(
     """
     if weights is None:
         weights = jnp.ones(positions.shape[:-1])
+
+    if kernel_width_arcmin is not None:
+        smoothing_rad = jnp.asarray(kernel_width_arcmin) * (jnp.pi / 180.0) / 60.0
+
+        if smoothing_interpretation == "fwhm":
+            sigma = smoothing_rad / 2.355
+        elif smoothing_interpretation == "2sigma":
+            sigma = smoothing_rad / 2.0
+        elif smoothing_interpretation == "sigma":
+            sigma = smoothing_rad
+        else:
+            raise ValueError(
+                "smoothing_interpretation must be one of 'fwhm', 'sigma', or '2sigma'"
+            )
+    else:
+        pixel_scale = jnp.asarray(jhp.nside2resol(nside))
+        sigma = pixel_scale / 2.0
 
     # Convert particle positions to physical coordinates
     positions_phys = positions * jnp.array(box_size) / jnp.array(mesh_shape)
@@ -270,7 +295,7 @@ def paint_particles_spherical_rbf_neighbor(
 
     # Gaussian kernel weights
     kernel_weights = jnp.exp(
-        -(gamma**2) / (2 * sigma_fixed**2)) / (2 * jnp.pi * sigma_fixed**2)
+        -(gamma**2) / (2 * sigma**2)) / (2 * jnp.pi * sigma**2)
 
     # Mask invalid neighbors (pix == -1) and renormalize per particle to conserve mass
     valid_mask = (pix9 != -1)
@@ -302,9 +327,9 @@ def paint_particles_spherical_rbf_neighbor(
 
 
 @partial(jax.jit,
-         static_argnames=("nside", "method", "udgrade_order_in",
-                          "udgrade_order_out", "udgrade_power", "udgrade_pess",
-                          "paint_nside"))
+         static_argnames=("nside", "method", "ud_grade_order_in",
+                          "ud_grade_order_out", "ud_grade_power", "ud_grade_pess",
+                          "paint_nside", "smoothing_interpretation"))
 def paint_particles_spherical(
     positions: Array,
     nside: int,
@@ -315,13 +340,14 @@ def paint_particles_spherical(
     mesh_shape: Tuple[int, int, int],
     weights: Optional[Array] = None,
     method: str = "ngp",
-    sigma_fixed: float = 0.05,
+    kernel_width_arcmin: float = 1.0,
+    smoothing_interpretation: str = "fwhm",
     # High-resolution painting option
     paint_nside: Optional[int] = None,
-    udgrade_power: float = 0.0,
-    udgrade_order_in: str = "RING",
-    udgrade_order_out: str = "RING",
-    udgrade_pess: bool = False,
+    ud_grade_power: float = 0.0,
+    ud_grade_order_in: str = "RING",
+    ud_grade_order_out: str = "RING",
+    ud_grade_pess: bool = False,
 ) -> Array:
     """
     High-level spherical painter: select method and optionally paint at higher resolution.
@@ -347,18 +373,24 @@ def paint_particles_spherical(
         Particle weights (default: uniform weights)
     method (case-insensitive): str
         Painting method: 'ngp', 'bilinear', or 'rbf_neighbor'
-    sigma_fixed : float
-        Fixed smoothing width parameter for RBF method
+    kernel_width_arcmin : float
+        Width of the Gaussian kernel in arcminutes for the RBF method.
+        Larger values → more smoothing. Smaller values → less smoothing.
+    smoothing_interpretation : {"fwhm", "sigma", "2sigma"}
+        Interpretation of kernel_width_arcmin for the RBF method:
+        - 'fwhm': full-width at half-maximum
+        - 'sigma': standard deviation
+        - '2sigma': 2× standard deviation
     paint_nside : int, optional
         Internal resolution to paint at. If None, equals nside.
-    udgrade_power : float
-        Power parameter for udgrade
-    udgrade_order_in : str
-        Input pixel ordering for udgrade
-    udgrade_order_out : str
-        Output pixel ordering for udgrade
-    udgrade_pess : bool
-        Pessimistic flag for udgrade
+    ud_grade_power : float
+        Power parameter for ud_grade
+    ud_grade_order_in : str
+        Input pixel ordering for ud_grade
+    ud_grade_order_out : str
+        Output pixel ordering for ud_grade
+    ud_grade_pess : bool
+        Pessimistic flag for ud_grade
 
     Returns
     -------
@@ -404,7 +436,8 @@ def paint_particles_spherical(
             box_size,
             mesh_shape,
             weights=weights,
-            sigma_fixed=sigma_fixed,
+            kernel_width_arcmin=kernel_width_arcmin,
+            smoothing_interpretation=smoothing_interpretation,
         )
     else:
         raise ValueError(
@@ -413,13 +446,13 @@ def paint_particles_spherical(
 
     # If internal resolution differs from target, up/down-grade
     if internal_nside != int(nside):
-        return jhp.udgrade(
+        return jhp.ud_grade(
             map_hi,
             int(nside),
-            pess=udgrade_pess,
-            order_in=udgrade_order_in,
-            order_out=udgrade_order_out,
-            power=udgrade_power,
+            pess=ud_grade_pess,
+            order_in=ud_grade_order_in,
+            order_out=ud_grade_order_out,
+            power=ud_grade_power,
         )
 
     return map_hi
