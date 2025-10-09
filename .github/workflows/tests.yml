@@ -55,17 +55,15 @@ jobs:
         pip install setuptools cython mpi4py
         # Install test requirements with no-build-isolation for faster builds
         pip install -r requirements-test.txt --no-build-isolation
-        # Install additional test dependencies
-        pip install pytest diffrax
-        # Install package in development mode
-        pip install -e .
+        # Install packages with test dependencies
+        pip install -e .[test]
         echo "numpy version installed:"
         python -c "import numpy; print(numpy.__version__)"
 
     - name: Run Single Device Tests
       run: |
         cd tests
-        pytest -v -m "not distributed"
+        pytest -v -s -m "not distributed"
 
     - name: Run Distributed tests
       run: |
