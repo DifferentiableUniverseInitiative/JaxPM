@@ -57,15 +57,15 @@ jobs:
         pip install -r requirements-test.txt --no-build-isolation
         # Install additional test dependencies
         pip install pytest diffrax 'glass[examples] @ git+https://github.com/glass-dev/glass'
-        # Install package in development mode
-        pip install -e .
+        # Install packages with test dependencies
+        pip install -e .[test]
         echo "numpy version installed:"
         python -c "import numpy; print(numpy.__version__)"
 
     - name: Run Single Device Tests
       run: |
         cd tests
-        pytest -v -m "not distributed"
+        pytest -v -s -m "not distributed"
 
     - name: Run Distributed tests
       run: |
