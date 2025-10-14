@@ -25,6 +25,9 @@ def density_plane_fn(box_shape,
         w = density_plane_width / box_size[2] * box_shape[2]
         center = jc.background.radial_comoving_distance(
             cosmo, t) / box_size[2] * box_shape[2]
+        # Clear workspace to avoid memory issues and tracer leaks
+        # due to the caching system in jax-cosmo
+        cosmo._workspace = {}
         positions = uniform_particles(box_shape) + positions
         xy = positions[..., :2]
         d = positions[..., 2]
@@ -63,7 +66,9 @@ def spherical_density_fn(mesh_shape,
                          box_size,
                          nside,
                          observer_position,
-                         d_R,
+                         density_plane_width,
+                         method="RBF_NEIGHBOR",
+                         kernel_width_arcmin=None,
                          sharding=None):
 
     def f(t, y, args):
@@ -77,8 +82,8 @@ def spherical_density_fn(mesh_shape,
         # Clear workspace to avoid memory issues
         # due to the caching system in jax-cosmo
         cosmo._workspace = {}
-        r_max = jnp.clip(r_center + d_R / 2, 0, box_size[2])
-        r_min = jnp.clip(r_center - d_R / 2, 0, box_size[2])
+        r_max = jnp.clip(r_center + density_plane_width / 2, 0, box_size[2])
+        r_min = jnp.clip(r_center - density_plane_width / 2, 0, box_size[2])
 
         if sharding is not None:
             positions = jax.lax.with_sharding_constraint(positions, sharding)
@@ -87,6 +92,8 @@ def spherical_density_fn(mesh_shape,
         spherical_map = paint_particles_spherical(
             positions,
             nside=nside,
+            method=method,
+            kernel_width_arcmin=kernel_width_arcmin,
             observer_position=observer_position,
             R_min=r_min,
             R_max=r_max,
@@ -183,6 +190,10 @@ def convergence_Born(cosmo,
                                                           r)
 
     # --- 5. Final Assembly ---
+    # In case of multiple source redshifts, and a flat sky approximation,
+    # We need to add a dimension to match the 2D shape of the kappa contributions
+    if jnp.ndim(z_source) > 0 and not is_spherical:
+        chi_s = jnp.expand_dims(chi_s, axis=1)
     # Apply the constant factor and the lensing efficiency kernel: (χs - χ) / χs
     lensing_efficiency = jnp.clip(1.0 - (r_b / chi_s), 0, 1000)
     # Add a dimension for broadcasting the redshift dimension
