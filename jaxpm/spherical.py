@@ -459,10 +459,11 @@ def paint_particles_spherical(
 
     return map_hi
 
-@partial(jax.jit, static_argnames=("nside",))
+
+@partial(jax.jit, static_argnames=("nside", ))
 def spherical_visibility_mask(
-    nside: int,
-    observer_position: Array,  # normalized coords in [0,1]^3
+        nside: int,
+        observer_position: Array,  # normalized coords in [0,1]^3
 ) -> Array:
     """
     Geometric visibility mask using only nside and observer_position.
@@ -481,8 +482,8 @@ def spherical_visibility_mask(
     """
     obs = jnp.asarray(observer_position, dtype=jnp.float32)  # (3,)
     obs = jnp.clip(obs, 0.0, 1.0)
-    bmin = jnp.zeros((3,), dtype=jnp.float32)
-    bmax = jnp.ones((3,), dtype=jnp.float32)
+    bmin = jnp.zeros((3, ), dtype=jnp.float32)
+    bmax = jnp.ones((3, ), dtype=jnp.float32)
 
     npix = jhp.nside2npix(nside)
     ipix = jnp.arange(npix, dtype=jnp.int64)
@@ -493,20 +494,16 @@ def spherical_visibility_mask(
     # For axes where dir == 0, treat as parallel: if obs is inside the slab,
     # set t to (-inf, +inf); else to (+inf, -inf) so it won't intersect.
     eps = jnp.float32(1e-12)
-    inside_axis = (obs >= bmin) & (obs <= bmax)            # (3,)
-    dir_nz = jnp.abs(dirs) > eps                           # (npix, 3)
+    inside_axis = (obs >= bmin) & (obs <= bmax)  # (3,)
+    dir_nz = jnp.abs(dirs) > eps  # (npix, 3)
 
-    t1 = jnp.where(
-        dir_nz, (bmin - obs) / dirs,
-        jnp.where(inside_axis, -jnp.inf, jnp.inf)
-    )
-    t2 = jnp.where(
-        dir_nz, (bmax - obs) / dirs,
-        jnp.where(inside_axis,  jnp.inf, -jnp.inf)
-    )
+    t1 = jnp.where(dir_nz, (bmin - obs) / dirs,
+                   jnp.where(inside_axis, -jnp.inf, jnp.inf))
+    t2 = jnp.where(dir_nz, (bmax - obs) / dirs,
+                   jnp.where(inside_axis, jnp.inf, -jnp.inf))
 
-    tmin = jnp.max(jnp.minimum(t1, t2), axis=-1)           # (npix,)
-    tmax = jnp.min(jnp.maximum(t1, t2), axis=-1)           # (npix,)
+    tmin = jnp.max(jnp.minimum(t1, t2), axis=-1)  # (npix,)
+    tmax = jnp.min(jnp.maximum(t1, t2), axis=-1)  # (npix,)
 
     # Visible if the forward ray intersects: tmax >= max(tmin, 0)
     visible = tmax > jnp.maximum(tmin, jnp.float32(0.0))
