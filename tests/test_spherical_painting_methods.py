@@ -31,7 +31,8 @@ from jax_cosmo.redshift import redshift_distribution
 from jaxpm.distributed import fft3d
 from jaxpm.growth import growth_factor as jpm_growth_factor
 from jaxpm.pm import linear_field, lpt, pm_forces
-from jaxpm.spherical import paint_particles_spherical, spherical_visibility_mask
+from jaxpm.spherical import (paint_particles_spherical,
+                             spherical_visibility_mask)
 
 # ----------------------
 # Fixed configuration
@@ -363,7 +364,8 @@ def test_spherical_painting_differentiability(positions_lpt, method, kwargs):
     assert grad_magnitude > 1e-8, (
         f"Gradients too small for differentiable method {method}: {grad_magnitude:.2e}"
     )
-    print(f"   ✅ Non-zero gradients detected (magnitude: {grad_magnitude:.2e})")
+    print(
+        f"   ✅ Non-zero gradients detected (magnitude: {grad_magnitude:.2e})")
 
 
 @pytest.mark.single_device
@@ -452,14 +454,14 @@ def test_spherical_visibility_mask_vs_painting(obs_x, obs_y, obs_z):
     nside = 32
     n_particles = 64
 
-    observer_pos_normalized = jnp.array([obs_x, obs_y, obs_z], dtype=jnp.float32)
+    observer_pos_normalized = jnp.array([obs_x, obs_y, obs_z],
+                                        dtype=jnp.float32)
     observer_pos_physical = observer_pos_normalized * jnp.array(BOX_SIZE)
 
     mesh_shape_test = (n_particles, n_particles, n_particles)
-    particles = jnp.stack(
-        jnp.meshgrid(*[jnp.arange(s) for s in mesh_shape_test], indexing="ij"),
-        axis=-1
-    )
+    particles = jnp.stack(jnp.meshgrid(
+        *[jnp.arange(s) for s in mesh_shape_test], indexing="ij"),
+                          axis=-1)
 
     R_min = 10.0
     R_max = 2000.0
