@@ -9,7 +9,7 @@ import jax
 import jax.numpy as jnp
 import jaxdecomp
 from jax import lax
-from jax.experimental.shard_map import shard_map
+from jax import shard_map
 from jax.sharding import AbstractMesh, Mesh
 from jax.sharding import PartitionSpec as P
 
