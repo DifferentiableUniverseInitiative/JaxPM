@@ -18,14 +18,19 @@ def autoshmap(
     gpu_mesh: Mesh | AbstractMesh | None,
     in_specs: Specs,
     out_specs: Specs,
-    check_rep: bool = False,
-    auto: frozenset[AxisName] = frozenset()) -> Callable:
+    check_vma: bool = False,
+    axis_names: Set[AxisName] = frozenset()) -> Callable:
     """Helper function to wrap the provided function in a shard map if
     the code is being executed in a mesh context."""
     if gpu_mesh is None or gpu_mesh.empty:
         return f
     else:
-        return shard_map(f, gpu_mesh, in_specs, out_specs, check_rep, auto)
+        return shard_map(f,
+                         mesh=gpu_mesh,
+                         in_specs=in_specs,
+                         out_specs=out_specs,
+                         check_vma=check_vma,
+                         axis_names=axis_names)
 
 
 def fft3d(x):
