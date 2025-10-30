@@ -51,12 +51,15 @@ jobs:
         python -m pip install --upgrade pip setuptools wheel
         # Install JAX first as it's a key dependency
         pip install jax
-        # Install build dependencies
-        pip install setuptools cython mpi4py
-        # Install test requirements with no-build-isolation for faster builds
-        pip install -r requirements-test.txt --no-build-isolation
         # Install packages with test dependencies
         pip install -e .[test]
+        # Install build dependencies
+        pip install setuptools cython mpi4py
+        # Install test requirements with no-build-isolation for PFFT
+        pip install -r requirements-test.txt --no-build-isolation
+        # Install additional test dependencies
+        pip install pytest diffrax 'glass[examples] @ git+https://github.com/glass-dev/glass'
+        # Install packages with test dependencies
         echo "numpy version installed:"
         python -c "import numpy; print(numpy.__version__)"
 

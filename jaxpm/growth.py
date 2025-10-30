@@ -599,3 +599,32 @@ def dGf2a(cosmo, a):
     E_a = E(cosmo, a)
     return (f2p * a**3 * E_a + D2f * a**3 * dEa(cosmo, a) +
             3 * a**2 * E_a * D2f)
+
+
+def gp(cosmo, a):
+    r""" Derivative of D1 against a
+
+    Parameters
+    ----------
+    cosmo: dict
+      Cosmology dictionary.
+
+    a : array_like
+       Scale factor.
+
+    Returns
+    -------
+    Scalar float Tensor : the derivative of D1 against a.
+
+    Notes
+    -----
+
+    The expression for :math:`gp(a)` is:
+
+    .. math::
+        gp(a)=\frac{dD1}{da}= D'_{1norm}/a
+    """
+    f1 = growth_rate(cosmo, a)
+    g1 = growth_factor(cosmo, a)
+    D1f = f1 * g1 / a
+    return D1f
