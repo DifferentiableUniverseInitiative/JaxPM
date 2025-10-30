@@ -3,6 +3,7 @@ from typing import Any, Callable, Hashable
 Specs = Any
 AxisName = Hashable
 
+from collections.abc import Set
 from functools import partial
 
 import jax
