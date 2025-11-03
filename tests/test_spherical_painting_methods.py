@@ -31,7 +31,8 @@ from jax_cosmo.redshift import redshift_distribution
 from jaxpm.distributed import fft3d
 from jaxpm.growth import growth_factor as jpm_growth_factor
 from jaxpm.pm import linear_field, lpt, pm_forces
-from jaxpm.spherical import paint_particles_spherical
+from jaxpm.spherical import (paint_particles_spherical,
+                             spherical_visibility_mask)
 
 # ----------------------
 # Fixed configuration
@@ -360,9 +361,36 @@ def test_spherical_painting_differentiability(positions_lpt, method, kwargs):
 
     # Smooth methods should have non-trivial gradients
     grad_magnitude = jnp.abs(gradient)
-    assert grad_magnitude > 1e-8, f"Gradients too small for differentiable method {method}: {grad_magnitude:.2e}"
+    assert grad_magnitude > 1e-8, (
+        f"Gradients too small for differentiable method {method}: {grad_magnitude:.2e}"
+    )
     print(
         f"   ✅ Non-zero gradients detected (magnitude: {grad_magnitude:.2e})")
+
+
+@pytest.mark.single_device
+def test_spherical_visibility_mask_center_covers_all_pixels():
+    nside = 8
+    mask = spherical_visibility_mask(
+        nside=nside,
+        observer_position=jnp.array([0.5, 0.5, 0.5], dtype=jnp.float32),
+    )
+    mask_np = np.asarray(mask)
+    assert mask_np.shape == (hp.nside2npix(nside), )
+    assert np.all(mask_np == 1.0)
+
+
+@pytest.mark.single_device
+def test_spherical_visibility_mask_corner_has_partial_coverage():
+    nside = 8
+    mask = spherical_visibility_mask(
+        nside=nside,
+        observer_position=jnp.array([0.0, 0.0, 0.0], dtype=jnp.float32),
+    )
+    mask_np = np.asarray(mask)
+    assert mask_np.shape == (hp.nside2npix(nside), )
+    assert np.any(mask_np == 1.0)
+    assert np.any(mask_np == 0.0)
 
 
 @pytest.mark.single_device
@@ -415,6 +443,64 @@ def test_ngp_zero_gradients(positions_lpt, method, kwargs):
     grad_magnitude = jnp.abs(gradient)
     assert grad_magnitude == 0.0, f"Non-zero gradient for non-differentiable method {method}: {grad_magnitude:.2e}"
     print(f"   ✅ Zero gradients confirmed (magnitude: {grad_magnitude:.2e})")
+
+
+@pytest.mark.single_device
+@pytest.mark.parametrize("obs_x", [0.0, 0.25, 0.5, 0.75, 1.0])
+@pytest.mark.parametrize("obs_y", [0.0, 0.25, 0.5, 0.75, 1.0])
+@pytest.mark.parametrize("obs_z", [0.0, 0.25, 0.5, 0.75, 1.0])
+def test_spherical_visibility_mask_vs_painting(obs_x, obs_y, obs_z):
+    """Test analytical visibility mask against empirical painting."""
+    nside = 32
+    n_particles = 64
+
+    observer_pos_normalized = jnp.array([obs_x, obs_y, obs_z],
+                                        dtype=jnp.float32)
+    observer_pos_physical = observer_pos_normalized * jnp.array(BOX_SIZE)
+
+    mesh_shape_test = (n_particles, n_particles, n_particles)
+    particles = jnp.stack(jnp.meshgrid(
+        *[jnp.arange(s) for s in mesh_shape_test], indexing="ij"),
+                          axis=-1)
+
+    R_min = 10.0
+    R_max = 2000.0
+
+    painted_map = paint_particles_spherical(
+        particles,
+        method="ngp",
+        nside=nside,
+        observer_position=observer_pos_physical,
+        R_min=R_min,
+        R_max=R_max,
+        box_size=BOX_SIZE,
+        mesh_shape=mesh_shape_test,
+    )
+
+    analytical_mask = spherical_visibility_mask(
+        nside=nside,
+        observer_position=observer_pos_normalized,
+    )
+
+    painted_np = np.asarray(painted_map)
+    mask_np = np.asarray(analytical_mask)
+    painted_np = np.where(painted_np < 1e-12, 0.0, 1.0)
+
+    invisible_pixels = (mask_np == 0.0)
+    if np.any(invisible_pixels):
+        violations = painted_np[invisible_pixels] > 0
+        if np.any(violations):
+            n_violations = violations.sum()
+            total_invisible = invisible_pixels.sum()
+            violation_rate = n_violations / total_invisible
+            assert violation_rate < 0.02, \
+                f"Observer at {observer_pos_normalized}: {n_violations}/{total_invisible} " \
+                f"({violation_rate:.2%}) invisible pixels have painted particles (>2% threshold)"
+
+    visible_pixels = (mask_np == 1.0)
+    if np.any(visible_pixels):
+        assert np.any(painted_np[visible_pixels] > 0.0), \
+            f"Observer at {observer_pos_normalized}: no particles painted where mask=1"
 
 
 @pytest.mark.single_device
