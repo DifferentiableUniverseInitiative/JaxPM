@@ -56,33 +56,28 @@ def paint_particles_spherical_ngp(
     rel_positions = positions_phys - jnp.asarray(observer_position)
 
     # Comoving distance from observer
-    r = jnp.sqrt(jnp.sum(rel_positions**2, axis=-1))
+    r = jnp.linalg.norm(rel_positions, axis=-1)
 
     # Apply distance cuts - use masking instead of boolean indexing
     distance_mask = (r >= R_min) & (r <= R_max)
 
-    # Flatten arrays for processing (keep static shapes)
-    rel_positions_flat = rel_positions.reshape(-1, 3)
-    r_flat = r.flatten()
-    weights_flat = weights.flatten()
-    distance_mask_flat = distance_mask.flatten()
-
-    # Apply mask to weights (static shape preserved)
-    masked_weights = jnp.where(distance_mask_flat, weights_flat, 0.0)
+    # Apply mask to weights (original shape preserved)
+    masked_weights = jnp.where(distance_mask, weights, 0.0)
 
     # Safe division to avoid division by zero
-    r_safe = jnp.where(r_flat > 1e-10, r_flat, 1e-10)
-    unit_vecs = rel_positions_flat / r_safe[..., None]
+    r_safe = jnp.where(r > 1e-10, r, 1e-10)
+    unit_vecs = rel_positions / r_safe[..., None]
 
-    # Convert unit vectors to angles using jax_healpy
+    # Convert unit vectors to angles using jax_healpy (preserves batch shape)
     theta, phi = jhp.vec2ang(unit_vecs)
 
-    # Convert to HEALPix pixel indices
+    # Convert to HEALPix pixel indices (preserves batch shape)
     pixels = jhp.ang2pix(nside, theta, phi)
 
-    # Bin particles into HEALPix pixels
+    # Bin particles into HEALPix pixels (flatten here for bincount)
     npix = jhp.nside2npix(nside)
-    healpix_map = jnp.bincount(pixels, weights=masked_weights, length=npix)
+    healpix_map = jnp.zeros(npix, dtype=masked_weights.dtype)
+    healpix_map = healpix_map.at[pixels].add(masked_weights)
 
     # Calculate volume per pixel in spherical shell (exact shell volume)
     pixel_solid_angle = 4 * jnp.pi / npix  # steradians per pixel
@@ -141,36 +136,31 @@ def paint_particles_spherical_bilinear(
     rel_positions = positions_phys - jnp.asarray(observer_position)
 
     # Comoving distance from observer
-    r = jnp.sqrt(jnp.sum(rel_positions**2, axis=-1))
+    r = jnp.linalg.norm(rel_positions, axis=-1)
 
     # Apply distance cuts using masking (no boolean indexing)
     distance_mask = (r >= R_min) & (r <= R_max)
 
-    # Flatten arrays (keep static shapes)
-    rel_positions_flat = rel_positions.reshape(-1, 3)
-    r_flat = r.flatten()
-    weights_flat = weights.flatten()
-    distance_mask_flat = distance_mask.flatten()
-
-    # Apply mask to weights (static shape preserved)
-    masked_weights = jnp.where(distance_mask_flat, weights_flat, 0.0)
+    # Apply mask to weights (original shape preserved)
+    masked_weights = jnp.where(distance_mask, weights, 0.0)
 
     # Safe division to avoid division by zero
-    r_safe = jnp.where(r_flat > 1e-10, r_flat, 1e-10)
-    unit_vecs = rel_positions_flat / r_safe[..., None]
+    r_safe = jnp.where(r > 1e-10, r, 1e-10)
+    unit_vecs = rel_positions / r_safe[..., None]
 
-    # Convert unit vectors to spherical coordinates
+    # Convert unit vectors to spherical coordinates (preserves batch shape)
     theta, phi = jhp.vec2ang(unit_vecs)
 
-    # Get bilinear interpolation weights and pixel indices
+    # Get bilinear interpolation weights and pixel indices: (4, *batch)
     pixels, interp_weights = jhp.get_interp_weights(nside, theta, phi)
 
     # Initialize HEALPix map
     npix = jhp.nside2npix(nside)
     healpix_map = jnp.zeros(npix)
 
-    contributions = interp_weights * masked_weights[None, :]
-    # Calculate contributions for each of the 4 nearest pixels
+    # interp_weights: (4, *batch), masked_weights: (*batch,) broadcasts to (4, *batch)
+    contributions = interp_weights * masked_weights
+    # Scatter contributions (flatten for at[].add — communication unavoidable)
     healpix_map = healpix_map.at[pixels].add(contributions)
 
     # Apply shell-volume normalization
@@ -257,41 +247,35 @@ def paint_particles_spherical_rbf_neighbor(
     rel_positions = positions_phys - jnp.asarray(observer_position)
 
     # Comoving distance from observer
-    r = jnp.sqrt(jnp.sum(rel_positions**2, axis=-1))
+    r = jnp.linalg.norm(rel_positions, axis=-1)
 
     # Apply distance cuts using masking (no boolean indexing)
     distance_mask = (r >= R_min) & (r <= R_max)
 
-    # Flatten arrays (keep static shapes)
-    rel_positions_flat = rel_positions.reshape(-1, 3)
-    r_flat = r.flatten()
-    weights_flat = weights.flatten()
-    distance_mask_flat = distance_mask.flatten()
-
-    # Apply mask to weights (static shape preserved)
-    masked_weights = jnp.where(distance_mask_flat, weights_flat, 0.0)
+    # Apply mask to weights (original shape preserved)
+    masked_weights = jnp.where(distance_mask, weights, 0.0)
 
     # Safe division to avoid division by zero
-    r_safe = jnp.where(r_flat > 1e-10, r_flat, 1e-10)
-    unit_vecs = rel_positions_flat / r_safe[..., None]
+    r_safe = jnp.where(r > 1e-10, r, 1e-10)
+    unit_vecs = rel_positions / r_safe[..., None]
 
-    # Convert unit vectors to spherical coordinates
+    # Convert unit vectors to spherical coordinates (preserves batch shape)
     theta, phi = jhp.vec2ang(unit_vecs)
 
-    # Get 9-pixel stencils: center + 8 neighbors
+    # Get 9-pixel stencils: center + 8 neighbors -> (9, *batch)
     pix9 = jhp.get_all_neighbours(nside,
                                   theta,
                                   phi,
                                   nest=False,
                                   get_center=True)
 
-    # Get unit vectors for all 9 pixels
-    flat_pix = pix9.reshape(-1)
-    vecs = jhp.pix2vec(nside, flat_pix).reshape(9, -1, 3)
+    # Get unit vectors for all 9 pixels -> (9, *batch, 3)
+    vecs = jhp.pix2vec(nside, pix9)
     # NaNs can arise for neighbors with index -1 (non-existent); keep vectors but mask later.
     vecs = jnp.nan_to_num(vecs)
-    # Compute angular separations for all (neighbor, particle) pairs
-    dots = jnp.einsum("ij,kij->ki", unit_vecs, vecs)
+
+    # Compute angular separations: (*batch, 3) broadcasts with (9, *batch, 3) -> sum over axis=-1 -> (9, *batch)
+    dots = jnp.sum(unit_vecs * vecs, axis=-1)
     gamma = jnp.arccos(jnp.clip(dots, -1.0, 1.0))
 
     # Gaussian kernel weights
@@ -301,25 +285,24 @@ def paint_particles_spherical_rbf_neighbor(
     # Mask invalid neighbors (pix == -1) and renormalize per particle to conserve mass
     valid_mask = (pix9 != -1)
     kernel_weights_masked = jnp.where(valid_mask, kernel_weights, 0.0)
-    weight_sum = jnp.sum(kernel_weights_masked, axis=0)
+    weight_sum = jnp.sum(kernel_weights_masked, axis=0)  # (*batch,)
     # Safe normalization: if no valid neighbors, keep zeros
-    norm_kernel = jnp.where(weight_sum[None, :] > 0.0,
-                            kernel_weights_masked / weight_sum[None, :], 0.0)
+    norm_kernel = jnp.where(weight_sum[None, ...] > 0.0,
+                            kernel_weights_masked / weight_sum[None, ...], 0.0)
 
     # Initialize HEALPix map size
     npix = jhp.nside2npix(nside)
 
     # Weight by particle weight; kernel sums to 1 per particle
     pixel_area = 4.0 * jnp.pi / npix
-    contrib = norm_kernel * masked_weights[None, :]
+    # masked_weights: (*batch,) broadcasts with (9, *batch)
+    contrib = norm_kernel * masked_weights
 
     # Scatter contributions into a map
-    idx = pix9.reshape(-1)
-    val = contrib.reshape(-1)
     # Avoid negative indices by zeroing their contributions and redirecting index to 0
-    valid_flat = (idx != -1)
-    idx_safe = jnp.where(valid_flat, idx, 0)
-    val_safe = jnp.where(valid_flat, val, 0.0)
+    valid = (pix9 != -1)
+    idx_safe = jnp.where(valid, pix9, 0)
+    val_safe = jnp.where(valid, contrib, 0.0)
     healpix_map = jnp.zeros(npix).at[idx_safe].add(val_safe)
 
     # Apply shell-volume normalization
@@ -331,7 +314,7 @@ def paint_particles_spherical_rbf_neighbor(
          static_argnames=("nside", "method", "ud_grade_order_in",
                           "ud_grade_order_out", "ud_grade_power",
                           "ud_grade_pess", "paint_nside",
-                          "smoothing_interpretation"))
+                          "smoothing_interpretation", "sharding"))
 def paint_particles_spherical(
     positions: Array,
     nside: int,
@@ -350,6 +333,8 @@ def paint_particles_spherical(
     ud_grade_order_in: str = "RING",
     ud_grade_order_out: str = "RING",
     ud_grade_pess: bool = False,
+    # Sharding infomration
+    sharding: Optional[jax.sharding.Sharding] = None,
 ) -> Array:
     """
     High-level spherical painter: select method and optionally paint at higher resolution.
