@@ -147,20 +147,9 @@ def cic_paint_2d(mesh, positions, weight):
             ..., None]  # (*batch, 1) broadcasts with (*batch, 4)
 
     # Flatten batch dims for scatter — communication is unavoidable here
-    print(f"shape of neighboor_coords before mod: {neighboor_coords.shape}")
-    print(f"shape of jnp.array(mesh.shape): {jnp.array(mesh.shape).shape}")
     neighboor_coords = jnp.mod(neighboor_coords.astype('int32'),
                                jnp.array(mesh.shape))
-    print(f"shape of neighboor_coords after mod: {neighboor_coords.shape}")
-    print(f"shape of kernel: {kernel.shape}")
 
-    jax.debug.inspect_array_sharding(
-        neighboor_coords,
-        callback=lambda sharding: print(
-            f"neighboor_coords sharding: {sharding}"))
-    jax.debug.inspect_array_sharding(
-        kernel,
-        callback=lambda sharding: print(f"kernel sharding: {sharding}"))
 
     dnums = jax.lax.ScatterDimensionNumbers(update_window_dims=(),
                                             inserted_window_dims=(0, 1),
