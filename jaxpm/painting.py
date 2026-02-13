@@ -150,7 +150,6 @@ def cic_paint_2d(mesh, positions, weight):
     neighboor_coords = jnp.mod(neighboor_coords.astype('int32'),
                                jnp.array(mesh.shape))
 
-
     dnums = jax.lax.ScatterDimensionNumbers(update_window_dims=(),
                                             inserted_window_dims=(0, 1),
                                             scatter_dims_to_operand_dims=(0,

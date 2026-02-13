@@ -46,9 +46,6 @@ def paint_particles_spherical_ngp(
     healpix_map : ndarray
         HEALPix density map
     """
-    if weights is None:
-        weights = jnp.ones(positions.shape[:-1])
-
     # Convert particle positions to physical coordinates
     positions_phys = positions * jnp.array(box_size) / jnp.array(mesh_shape)
 
@@ -126,9 +123,6 @@ def paint_particles_spherical_bilinear(
     healpix_map : ndarray
         HEALPix density map
     """
-    if weights is None:
-        weights = jnp.ones(positions.shape[:-1])
-
     # Convert particle positions to physical coordinates
     positions_phys = positions * jnp.array(box_size) / jnp.array(mesh_shape)
 
@@ -219,9 +213,6 @@ def paint_particles_spherical_rbf_neighbor(
     healpix_map : ndarray
         HEALPix density map
     """
-    if weights is None:
-        weights = jnp.ones(positions.shape[:-1])
-
     if kernel_width_arcmin is not None:
         smoothing_rad = jnp.asarray(kernel_width_arcmin) * (jnp.pi /
                                                             180.0) / 60.0
@@ -389,6 +380,11 @@ def paint_particles_spherical(
     # Determine internal nside for painting
     internal_nside = int(paint_nside) if paint_nside is not None else int(
         nside)
+
+    if weights is None:
+        # Alternative, shard perserving ones_like
+        weights = positions[
+            ..., 0] * 0.0 + 1.0  # shape (...,) with same sharding as positions
 
     # Select appropriate painter
     if method_upper == "NGP":
