@@ -600,6 +600,7 @@ def dGf2a(cosmo, a):
     return (f2p * a**3 * E_a + D2f * a**3 * dEa(cosmo, a) +
             3 * a**2 * E_a * D2f)
 
+
 def gp(cosmo, a):
     r"""Derivative of the first-order growth factor D1 with respect to
     scale factor.

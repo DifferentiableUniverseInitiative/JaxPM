@@ -8,13 +8,18 @@ import jax_healpy as jhp
 Array = jnp.ndarray
 
 
-def _allocate_healpix_map(nside: int, dtype=jnp.float32, sharding: Optional[jax.sharding.Sharding] = None) -> Array:
+def _allocate_healpix_map(
+        nside: int,
+        dtype=jnp.float32,
+        sharding: Optional[jax.sharding.Sharding] = None) -> Array:
     npix = jhp.nside2npix(nside)
     hp_map = jnp.zeros(npix, dtype=dtype)
     if sharding is not None:
-        sharding_1d = jax.sharding.NamedSharding(sharding.mesh, jax.P(sharding.spec[0]))
+        sharding_1d = jax.sharding.NamedSharding(sharding.mesh,
+                                                 jax.P(sharding.spec[0]))
         hp_map = jax.lax.with_sharding_constraint(hp_map, sharding_1d)
     return hp_map
+
 
 @partial(jax.jit, static_argnames=("nside", "sharding"))
 def paint_particles_spherical_ngp(
@@ -82,7 +87,9 @@ def paint_particles_spherical_ngp(
 
     # Bin particles into HEALPix pixels (flatten here for bincount)
     npix = jhp.nside2npix(nside)
-    healpix_map = _allocate_healpix_map(nside, dtype=masked_weights.dtype, sharding=sharding)
+    healpix_map = _allocate_healpix_map(nside,
+                                        dtype=masked_weights.dtype,
+                                        sharding=sharding)
     healpix_map = healpix_map.at[pixels].add(masked_weights)
 
     # Calculate volume per pixel in spherical shell (exact shell volume)
@@ -93,7 +100,7 @@ def paint_particles_spherical_ngp(
     return healpix_map / shell_volume_per_pixel
 
 
-@partial(jax.jit, static_argnames=("nside","sharding" ))
+@partial(jax.jit, static_argnames=("nside", "sharding"))
 def paint_particles_spherical_bilinear(
     positions: Array,
     nside: int,
@@ -160,7 +167,9 @@ def paint_particles_spherical_bilinear(
 
     # Initialize HEALPix map
     npix = jhp.nside2npix(nside)
-    healpix_map = _allocate_healpix_map(nside, dtype=masked_weights.dtype, sharding=sharding)
+    healpix_map = _allocate_healpix_map(nside,
+                                        dtype=masked_weights.dtype,
+                                        sharding=sharding)
 
     # interp_weights: (4, *batch), masked_weights: (*batch,) broadcasts to (4, *batch)
     contributions = interp_weights * masked_weights
@@ -173,7 +182,8 @@ def paint_particles_spherical_bilinear(
     return healpix_map / shell_vol_per_pix
 
 
-@partial(jax.jit, static_argnames=("nside", "smoothing_interpretation" ,"sharding"))
+@partial(jax.jit,
+         static_argnames=("nside", "smoothing_interpretation", "sharding"))
 def paint_particles_spherical_rbf_neighbor(
     positions: Array,
     nside: int,
@@ -305,7 +315,9 @@ def paint_particles_spherical_rbf_neighbor(
     valid = (pix9 != -1)
     idx_safe = jnp.where(valid, pix9, 0)
     val_safe = jnp.where(valid, contrib, 0.0)
-    healpix_map = _allocate_healpix_map(nside, dtype=masked_weights.dtype, sharding=sharding)
+    healpix_map = _allocate_healpix_map(nside,
+                                        dtype=masked_weights.dtype,
+                                        sharding=sharding)
     healpix_map = healpix_map.at[idx_safe].add(val_safe)
 
     # Apply shell-volume normalization
