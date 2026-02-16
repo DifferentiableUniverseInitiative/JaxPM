@@ -599,3 +599,34 @@ def dGf2a(cosmo, a):
     E_a = E(cosmo, a)
     return (f2p * a**3 * E_a + D2f * a**3 * dEa(cosmo, a) +
             3 * a**2 * E_a * D2f)
+
+def gp(cosmo, a):
+    r"""Derivative of the first-order growth factor D1 with respect to
+    scale factor.
+
+    Parameters
+    ----------
+    cosmo: Cosmology
+        Cosmology object
+
+    a : array_like
+        Scale factor
+
+    Returns
+    -------
+    dD1/da : ndarray, or float if input scalar
+        Derivative of D1 with respect to scale factor
+
+    Notes
+    -----
+    The expression for :math:`g_p(a)` is:
+
+    .. math::
+
+        g_p(a) = \frac{dD_1}{da} = \frac{f_1 \cdot D_1}{a}
+
+    where :math:`f_1 = d\ln D_1 / d\ln a` is the growth rate.
+    """
+    f1 = growth_rate(cosmo, a)
+    g1 = growth_factor(cosmo, a)
+    return f1 * g1 / a
