@@ -54,7 +54,9 @@ def paint_particles_spherical_ngp(
         Shape of the simulation mesh (nx, ny, nz)
     weights : ndarray, optional
         Particle weights (default: uniform weights)
-
+    sharding : jax.sharding.Sharding, optional
+        Sharding information for distributed computation. If provided, the HEALPix map
+        will be allocated with the specified sharding
     Returns
     -------
     healpix_map : ndarray
@@ -134,6 +136,9 @@ def paint_particles_spherical_bilinear(
         Shape of the simulation mesh (nx, ny, nz)
     weights : ndarray, optional
         Particle weights (default: uniform weights)
+    sharding : jax.sharding.Sharding, optional
+        Sharding information for distributed computation. If provided, the HEALPix map
+        will be allocated with the specified sharding
 
     Returns
     -------
@@ -228,6 +233,9 @@ def paint_particles_spherical_rbf_neighbor(
         - 'fwhm': kernel_width_arcmin is the full-width at half-maximum
         - 'sigma': kernel_width_arcmin is the standard deviation
         - '2sigma': kernel_width_arcmin is 2× the standard deviation
+    sharding : jax.sharding.Sharding, optional
+        Sharding information for distributed computation. If provided, the HEALPix map
+        will be allocated with the specified sharding
 
     Returns
     -------
@@ -393,6 +401,12 @@ def paint_particles_spherical(
         Output pixel ordering for ud_grade
     ud_grade_pess : bool
         Pessimistic flag for ud_grade
+    sharding : jax.sharding.Sharding, optional
+        Sharding information for distributed computation. If provided, the HEALPix map
+        will be allocated with the specified sharding but using only the first dimension.
+        This means that most effective domain decomposition will be slab-based along the first dimension
+        If sharding is provided, all the operations are guarenteed to use all the available devices
+        and the output map will be sharded according to the provided sharding.
 
     Returns
     -------
