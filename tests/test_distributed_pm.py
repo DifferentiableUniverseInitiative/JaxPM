@@ -13,12 +13,12 @@ from diffrax import Dopri5, ODETerm, PIDController, diffeqsolve
 from helpers import MSE  # noqa : E402
 from jax import lax  # noqa : E402
 from jax.experimental.multihost_utils import process_allgather  # noqa : E402
-from jax.sharding import NamedSharding
+from jax.sharding import AxisType, NamedSharding
 from jax.sharding import PartitionSpec as P  # noqa : E402
 from jaxdecomp import get_fft_output_sharding
 
 from jaxpm.distributed import uniform_particles  # noqa : E402
-from jaxpm.distributed import fft3d, ifft3d
+from jaxpm.distributed import fft3d, ifft3d, normal_field  # noqa : E402
 from jaxpm.painting import cic_paint, cic_paint_dx  # noqa : E402
 from jaxpm.pm import lpt, make_diffrax_ode, pm_forces  # noqa : E402
 
@@ -92,7 +92,8 @@ def test_distrubted_pm(simulation_config, initial_conditions, cosmo, order,
     print("Done with single device run")
     # MULTI DEVICE RUN
 
-    mesh = jax.make_mesh(pdims, ('x', 'y'))
+    mesh = jax.make_mesh(pdims, ('x', 'y'),
+                         axis_types=(AxisType.Auto, AxisType.Auto))
     sharding = NamedSharding(mesh, P('x', 'y'))
     halo_size = mesh_shape[0] // 2
 
@@ -187,7 +188,8 @@ def test_distrubted_gradients(simulation_config, initial_conditions, cosmo,
     # SINGLE DEVICE RUN
     cosmo._workspace = {}
 
-    mesh = jax.make_mesh(pdims, ('x', 'y'))
+    mesh = jax.make_mesh(pdims, ('x', 'y'),
+                         axis_types=(AxisType.Auto, AxisType.Auto))
     sharding = NamedSharding(mesh, P('x', 'y'))
     halo_size = mesh_shape[0] // 2
 
@@ -264,7 +266,8 @@ def test_fwd_rev_gradients(cosmo, pdims):
     mesh_shape, box_shape = (8, 8, 8), (20.0, 20.0, 20.0)
     cosmo._workspace = {}
 
-    mesh = jax.make_mesh(pdims, ('x', 'y'))
+    mesh = jax.make_mesh(pdims, ('x', 'y'),
+                         axis_types=(AxisType.Auto, AxisType.Auto))
     sharding = NamedSharding(mesh, P('x', 'y'))
     halo_size = mesh_shape[0] // 2
 
@@ -333,7 +336,8 @@ def test_vmap(cosmo, pdims):
     mesh_shape, box_shape = (8, 8, 8), (20.0, 20.0, 20.0)
     cosmo._workspace = {}
 
-    mesh = jax.make_mesh(pdims, ('x', 'y'))
+    mesh = jax.make_mesh(pdims, ('x', 'y'),
+                         axis_types=(AxisType.Auto, AxisType.Auto))
     sharding = NamedSharding(mesh, P('x', 'y'))
     halo_size = mesh_shape[0] // 2
 
@@ -402,3 +406,24 @@ def test_vmap(cosmo, pdims):
     assert sharded_forces[0].sharding.is_equivalent_to(
         initial_conditions.sharding, ndim=3)
     assert sharded_forces.sharding.spec[0] == None
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize("dim", [1, 2, 3])
+@pytest.mark.parametrize("pdims", pdims)
+def test_normal_field(dim, pdims):
+
+    shape = (16, ) * dim
+
+    mesh = jax.make_mesh(pdims, ('x', 'y'),
+                         axis_types=(AxisType.Auto, AxisType.Auto))
+    sharding = NamedSharding(mesh, P('x', 'y'))
+
+    dist_field = normal_field(seed=jax.random.PRNGKey(42),
+                              shape=shape,
+                              sharding=sharding)
+    if dim == 1:
+        sharding = NamedSharding(mesh, P('x'))
+
+    assert dist_field.shape == shape
+    assert sharding.is_equivalent_to(dist_field.sharding, ndim=dim)
