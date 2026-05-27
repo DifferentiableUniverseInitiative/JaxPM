@@ -55,6 +55,8 @@ jobs:
         pip install -e .[test]
         # Install build dependencies
         pip install setuptools cython mpi4py
+        # Temporary until Eiffl merges https://github.com/DifferentiableUniverseInitiative/jax_cosmo/pull/146 (please do it :) )
+        pip install git+https://github.com/ASKabalan/jax_cosmo@fix-import-error
         # Install test requirements with no-build-isolation for faster builds
         pip install -r requirements-test.txt --no-build-isolation
         echo "numpy version installed:"
