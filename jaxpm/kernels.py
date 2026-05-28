@@ -56,7 +56,7 @@ def gradient_kernel(kvec, direction, order=1):
     if order == 0:
         wts = 1j * kvec[direction]
         wts = jnp.squeeze(wts)
-        wts[len(wts) // 2] = 0
+        wts = wts.at[len(wts) // 2].set(0)
         wts = wts.reshape(kvec[direction].shape)
         return wts
     else:
