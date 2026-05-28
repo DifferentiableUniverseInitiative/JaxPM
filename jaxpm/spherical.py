@@ -348,7 +348,7 @@ def paint_particles_spherical(
     mesh_shape: Tuple[int, int, int],
     weights: Optional[Array] = None,
     method: str = "ngp",
-    kernel_width_arcmin: float = 1.0,
+    kernel_width_arcmin: Optional[float] = None,
     smoothing_interpretation: str = "fwhm",
     # High-resolution painting option
     paint_nside: Optional[int] = None,
