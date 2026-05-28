@@ -33,7 +33,7 @@ def enmesh(base_indices, displacements, cell_size, base_shape, offset,
     cell_size = jnp.array(cell_size, dtype=displacements.dtype)
     if base_shape is not None:
         base_shape = jnp.array(base_shape, dtype=base_indices.dtype)
-    offset = offset.astype(base_indices.dtype)
+    offset = jnp.asarray(offset).astype(base_indices.dtype)
     if new_cell_size is not None:
         new_cell_size = jnp.array(new_cell_size, dtype=displacements.dtype)
     if new_shape is not None:

@@ -131,30 +131,30 @@ def cic_read(grid_mesh, positions, halo_size=0, sharding=None):
 def cic_paint_2d(mesh, positions, weight):
     """ Paints positions onto a 2d mesh
     mesh: [nx, ny]
-    positions: [npart, 2]
-    weight: [npart]
+    positions: [..., 2]  (arbitrary batch dims preserved until scatter)
+    weight: [...] or None
     """
-    positions = positions.reshape([-1, 2])
-    positions = jnp.expand_dims(positions, 1)
+    positions = jnp.expand_dims(positions,
+                                -2)  # (*batch, 1, 2) — preserves sharding
     floor = jnp.floor(positions)
     connection = jnp.array([[0, 0], [1., 0], [0., 1], [1., 1]])
 
-    neighboor_coords = floor + connection
-    kernel = 1. - jnp.abs(positions - neighboor_coords)
-    kernel = kernel[..., 0] * kernel[..., 1]
+    neighboor_coords = floor + connection  # (*batch, 4, 2)
+    kernel = 1. - jnp.abs(positions - neighboor_coords)  # (*batch, 4, 2)
+    kernel = kernel[..., 0] * kernel[..., 1]  # (*batch, 4)
     if weight is not None:
-        kernel = kernel * weight.reshape(*positions.shape[:-1])
+        kernel = kernel * weight[
+            ..., None]  # (*batch, 1) broadcasts with (*batch, 4)
 
-    neighboor_coords = jnp.mod(
-        neighboor_coords.reshape([-1, 4, 2]).astype('int32'),
-        jnp.array(mesh.shape))
+    # Flatten batch dims for scatter — communication is unavoidable here
+    neighboor_coords = jnp.mod(neighboor_coords.astype('int32'),
+                               jnp.array(mesh.shape))
 
     dnums = jax.lax.ScatterDimensionNumbers(update_window_dims=(),
                                             inserted_window_dims=(0, 1),
                                             scatter_dims_to_operand_dims=(0,
                                                                           1))
-    mesh = lax.scatter_add(mesh, neighboor_coords, kernel.reshape([-1, 4]),
-                           dnums)
+    mesh = lax.scatter_add(mesh, neighboor_coords, kernel, dnums)
     return mesh
 
 
