@@ -6,16 +6,20 @@ from jaxpm.growth import E, Gf, dGfa, gp
 from jaxpm.growth import growth_factor as Gp
 from jaxpm.kernels import (fftk, gradient_kernel, invlaplace_kernel,
                            longrange_kernel)
-from jaxpm.painting import cic_paint, cic_read
+from jaxpm.painting import paint, readout
 from jaxpm.pm import pm_forces
 
 
-def symplectic_fpm_ode(mesh_shape,
-                       dt0,
-                       cosmo,
-                       paint_absolute_pos=True,
-                       halo_size=0,
-                       sharding=None):
+def symplectic_fpm_ode(
+        mesh_shape,
+        dt0,
+        cosmo,
+        paint_absolute_pos=None,  # deprecated, use initial_particles
+        halo_size=0,
+        sharding=None,
+        order='CIC',
+        deconvolution=False,
+        initial_particles=None):
 
     def drift(a, vel, args):
         """
@@ -49,6 +53,9 @@ def symplectic_fpm_ode(mesh_shape,
             paint_absolute_pos=paint_absolute_pos,
             halo_size=halo_size,
             sharding=sharding,
+            order=order,
+            deconvolution=deconvolution,
+            initial_particles=initial_particles,
         ) * 1.5 * cosmo.Omega_m)
 
         dvel = 1.0 / (ac**2 * E(cosmo, ac)) * forces
@@ -72,6 +79,9 @@ def symplectic_fpm_ode(mesh_shape,
             paint_absolute_pos=paint_absolute_pos,
             halo_size=halo_size,
             sharding=sharding,
+            order=order,
+            deconvolution=deconvolution,
+            initial_particles=initial_particles,
         ) * 1.5 * cosmo.Omega_m)
 
         dvel = 1.0 / (a**2 * E(cosmo, a)) * forces
@@ -82,11 +92,15 @@ def symplectic_fpm_ode(mesh_shape,
     return drift, kick, first_kick
 
 
-def symplectic_ode(mesh_shape,
-                   cosmo,
-                   paint_absolute_pos=True,
-                   halo_size=0,
-                   sharding=None):
+def symplectic_ode(
+        mesh_shape,
+        cosmo,
+        paint_absolute_pos=None,  # deprecated, use initial_particles
+        halo_size=0,
+        sharding=None,
+        order='CIC',
+        deconvolution=False,
+        initial_particles=None):
 
     def drift(a, vel, args):
         """
@@ -109,6 +123,9 @@ def symplectic_ode(mesh_shape,
             paint_absolute_pos=paint_absolute_pos,
             halo_size=halo_size,
             sharding=sharding,
+            order=order,
+            deconvolution=deconvolution,
+            initial_particles=initial_particles,
         ) * 1.5 * cosmo.Omega_m)
 
         # Computes the update of velocity (kick)
@@ -119,10 +136,14 @@ def symplectic_ode(mesh_shape,
     return drift, kick
 
 
-def make_ode_fn(mesh_shape,
-                paint_absolute_pos=True,
-                halo_size=0,
-                sharding=None):
+def make_ode_fn(
+        mesh_shape,
+        paint_absolute_pos=None,  # deprecated, use initial_particles
+        halo_size=0,
+        sharding=None,
+        order='CIC',
+        deconvolution=False,
+        initial_particles=None):
 
     def nbody_ode(state, a, cosmo):
         """
@@ -130,11 +151,15 @@ def make_ode_fn(mesh_shape,
         """
         pos, vel = state
 
-        forces = pm_forces(pos,
-                           mesh_shape=mesh_shape,
-                           paint_absolute_pos=paint_absolute_pos,
-                           halo_size=halo_size,
-                           sharding=sharding) * 1.5 * cosmo.Omega_m
+        forces = pm_forces(
+            pos,
+            mesh_shape=mesh_shape,
+            paint_absolute_pos=paint_absolute_pos,
+            halo_size=halo_size,
+            sharding=sharding,
+            order=order,
+            deconvolution=deconvolution,
+            initial_particles=initial_particles) * 1.5 * cosmo.Omega_m
 
         # Computes the update of position (drift)
         dpos = 1. / (a**3 * jnp.sqrt(jc.background.Esqr(cosmo, a))) * vel
@@ -147,10 +172,14 @@ def make_ode_fn(mesh_shape,
     return nbody_ode
 
 
-def make_diffrax_ode(mesh_shape,
-                     paint_absolute_pos=True,
-                     halo_size=0,
-                     sharding=None):
+def make_diffrax_ode(
+        mesh_shape,
+        paint_absolute_pos=None,  # deprecated, use initial_particles
+        halo_size=0,
+        sharding=None,
+        order='CIC',
+        deconvolution=False,
+        initial_particles=None):
 
     def nbody_ode(a, state, args):
         """
@@ -159,11 +188,15 @@ def make_diffrax_ode(mesh_shape,
         pos, vel = state
         cosmo = args
 
-        forces = pm_forces(pos,
-                           mesh_shape=mesh_shape,
-                           paint_absolute_pos=paint_absolute_pos,
-                           halo_size=halo_size,
-                           sharding=sharding) * 1.5 * cosmo.Omega_m
+        forces = pm_forces(
+            pos,
+            mesh_shape=mesh_shape,
+            paint_absolute_pos=paint_absolute_pos,
+            halo_size=halo_size,
+            sharding=sharding,
+            order=order,
+            deconvolution=deconvolution,
+            initial_particles=initial_particles) * 1.5 * cosmo.Omega_m
 
         # Computes the update of position (drift)
         dpos = 1. / (a**3 * jnp.sqrt(jc.background.Esqr(cosmo, a))) * vel
@@ -183,7 +216,7 @@ def make_neural_ode_fn(model, mesh_shape):
         state is a tuple (position, velocities)
         """
         pos, vel = state
-        delta = cic_paint(jnp.zeros(mesh_shape), pos)
+        delta = paint(pos, grid_mesh=jnp.zeros(mesh_shape), order='cic')
         delta_k = fft3d(delta)
         kvec = fftk(delta_k)
 
@@ -197,7 +230,7 @@ def make_neural_ode_fn(model, mesh_shape):
 
         # Computes gravitational forces
         forces = jnp.stack([
-            cic_read(fft3d(-gradient_kernel(kvec, i) * pot_k), pos)
+            readout(fft3d(-gradient_kernel(kvec, i) * pot_k), pos, order='cic')
             for i in range(3)
         ],
                            axis=-1)
