@@ -130,8 +130,12 @@ def power_spectrum(mesh,
         los = np.asarray(los)
         los = los / np.linalg.norm(los)
     poles = np.atleast_1d(multipoles)
-    dig, kcount, kavg, mumesh = _initialize_pk(mesh_shape, box_shape, kedges,
-                                               los, dk=dk, kmax=kmax)
+    dig, kcount, kavg, mumesh = _initialize_pk(mesh_shape,
+                                               box_shape,
+                                               kedges,
+                                               los,
+                                               dk=dk,
+                                               kmax=kmax)
     n_bins = len(kavg) + 2
 
     # FFTs
