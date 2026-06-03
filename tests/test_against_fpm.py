@@ -134,7 +134,7 @@ def test_nbody_relative(simulation_config, initial_conditions,
     # Initial displacement
     dx, p, _ = lpt(cosmo, initial_conditions, a=lpt_scale_factor, order=order)
 
-    ode_fn = ODETerm(make_diffrax_ode(mesh_shape, paint_absolute_pos=False))
+    ode_fn = ODETerm(make_diffrax_ode(mesh_shape, initial_particles='uniform'))
 
     solver = Dopri5()
     controller = PIDController(rtol=1e-9,
