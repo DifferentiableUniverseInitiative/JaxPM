@@ -5,6 +5,8 @@ import numpy as np
 from jax.scipy.stats import norm
 from scipy.special import legendre
 
+from jaxpm.kernels import compensation_kernel, gridding_shotnoise_kernel
+
 __all__ = [
     'power_spectrum', 'transfer', 'coherence', 'pktranscoh',
     'cross_correlation_coefficients', 'gaussian_smoothing'
@@ -78,9 +80,24 @@ def power_spectrum(mesh,
                    box_shape=None,
                    kedges: int | float | list = None,
                    multipoles=0,
-                   los=[0., 0., 1.]):
+                   los=[0., 0., 1.],
+                   compensate_order=None,
+                   shotnoise=None):
     """
     Compute the auto and cross spectrum of 3D fields, with multipoles.
+
+    Optional grid corrections (applied per-mode on the 3D field before binning,
+    since both are anisotropic):
+
+    compensate_order : int, str, or None
+        If set, deconvolve the mass-assignment window: divide the power by
+        ``W(k)**2`` with ``W = compensation_kernel(k, compensate_order)**(-1)``
+        (i.e. multiply ``|delta_k|**2`` by ``compensation_kernel**2``).
+    shotnoise : (order, nbar) or None
+        If set, subtract the aliased shot noise ``(1 / nbar) * C_order(k)``
+        before deconvolving (auto spectrum only). ``nbar`` is the mean number
+        density in the same units as ``box_shape`` (so ``nbar = N / box.prod()``;
+        for one particle per cell this is ``mesh.prod() / box.prod()``).
     """
     # Initialize
     mesh_shape = np.array(mesh.shape)
@@ -105,6 +122,27 @@ def power_spectrum(mesh,
         mmk = meshk.real**2 + meshk.imag**2
     else:
         mmk = meshk * jnp.fft.fftn(mesh2, norm='ortho').conj()
+
+    # Optional grid corrections, applied per-mode on the 3D power before binning.
+    # Both the window and the aliased shot noise are anisotropic, so they cannot
+    # be applied to the already-binned (isotropic) P(k). The dealiasing kernel
+    # lives in jaxpm.kernels and is reused here (master equation:
+    #   P_true = (P_meas - (1/nbar) C_order) / W**2).
+    if compensate_order is not None or shotnoise is not None:
+        kshapes = np.eye(len(mesh_shape), dtype=np.int32) * -2 + 1
+        kvec_cell = [
+            2 * np.pi * np.fft.fftfreq(m).reshape(kshape)
+            for m, kshape in zip(mesh_shape, kshapes)
+        ]
+        # cell-units shot noise in the same (mmk) units as |delta_k|**2:
+        # physical shot is C/nbar, and mmk = P_phys / (box/mesh).prod().
+        scale = (box_shape / mesh_shape).prod()
+        if shotnoise is not None and mesh2 is None:
+            sn_order, nbar = shotnoise
+            mmk = mmk - gridding_shotnoise_kernel(kvec_cell,
+                                                  sn_order) / (nbar * scale)
+        if compensate_order is not None:
+            mmk = mmk * compensation_kernel(kvec_cell, compensate_order)**2
 
     # Sum powers
     pk = jnp.empty((len(poles), n_bins))
