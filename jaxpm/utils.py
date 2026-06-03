@@ -54,7 +54,9 @@ def _initialize_pk(mesh_shape, box_shape, kedges, los):
     kshapes = np.eye(len(mesh_shape), dtype=np.int32) * -2 + 1
     kvec = [(2 * np.pi * m / l) * np.fft.fftfreq(m).reshape(kshape)
             for m, l, kshape in zip(mesh_shape, box_shape, kshapes)]
-    kmesh = jnp.sqrt(sum(ki**2 for ki in kvec))
+    # NumPy (not jnp): kvec is static, so kmesh/dig/kcount/kavg/mumesh are all
+    # compile-time constants. Using jnp.sqrt here would make kmesh a tracer
+    kmesh = np.sqrt(sum(ki**2 for ki in kvec))
 
     dig = np.digitize(kmesh.reshape(-1), kedges)
     kcount = np.bincount(dig, minlength=len(kedges) + 1)
