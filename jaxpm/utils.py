@@ -13,7 +13,7 @@ __all__ = [
 ]
 
 
-def _initialize_pk(mesh_shape, box_shape, kedges, los):
+def _initialize_pk(mesh_shape, box_shape, kedges, los, dk=None, kmax=None):
     """
     Parameters
     ----------
@@ -22,11 +22,16 @@ def _initialize_pk(mesh_shape, box_shape, kedges, los):
     box_shape : tuple of float
         Physical dimensions of the box.
     kedges : None, int, float, or list
-        If None, set dk to twice the minimum.
+        If None, build edges from ``dk``/``kmax``.
         If int, specifies number of edges.
         If float, specifies dk.
     los : array_like
         Line-of-sight vector.
+    dk : float, optional
+        Bin width. Defaults to twice the minimum wavenumber. Ignored when
+        ``kedges`` is an int or float (those specify the binning themselves).
+    kmax : float, optional
+        Maximum wavenumber. Defaults to the Nyquist frequency.
 
     Returns
     -------
@@ -39,16 +44,20 @@ def _initialize_pk(mesh_shape, box_shape, kedges, los):
     mumesh : ndarray
         Mu values for the mesh grid.
     """
-    kmax = np.pi * np.min(mesh_shape / box_shape)  # = knyquist
+    if kmax is None:
+        kmax = np.pi * np.min(mesh_shape / box_shape)  # = knyquist
 
     if isinstance(kedges, None | int | float):
         if kedges is None:
-            dk = 2 * np.pi / np.min(
-                box_shape) * 2  # twice the minimum wavenumber
-        if isinstance(kedges, int):
+            if dk is None:
+                dk = 2 * np.pi / np.min(
+                    box_shape) * 2  # twice the minimum wavenumber
+        elif isinstance(kedges, int):
             dk = kmax / (kedges + 1)  # final number of bins will be kedges-1
         elif isinstance(kedges, float):
             dk = kedges
+        if dk <= 0:
+            raise ValueError("dk must be positive and non-zero")
         kedges = np.arange(dk, kmax, dk) + dk / 2  # from dk/2 to kmax-dk/2
 
     kshapes = np.eye(len(mesh_shape), dtype=np.int32) * -2 + 1
@@ -81,12 +90,19 @@ def power_spectrum(mesh,
                    mesh2=None,
                    box_shape=None,
                    kedges: int | float | list = None,
+                   dk: float = None,
+                   kmax: float = None,
                    multipoles=0,
                    los=[0., 0., 1.],
                    compensate_order=None,
                    shotnoise=None):
     """
     Compute the auto and cross spectrum of 3D fields, with multipoles.
+
+    The k-binning is set by ``kedges`` (an explicit edge array, an int number of
+    bins, or a float bin width) or, when ``kedges is None``, by the ``dk`` (bin
+    width) and ``kmax`` (maximum wavenumber) knobs, which default to twice the
+    fundamental and the Nyquist frequency respectively.
 
     Optional grid corrections (applied per-mode on the 3D field before binning,
     since both are anisotropic):
@@ -115,7 +131,7 @@ def power_spectrum(mesh,
         los = los / np.linalg.norm(los)
     poles = np.atleast_1d(multipoles)
     dig, kcount, kavg, mumesh = _initialize_pk(mesh_shape, box_shape, kedges,
-                                               los)
+                                               los, dk=dk, kmax=kmax)
     n_bins = len(kavg) + 2
 
     # FFTs
