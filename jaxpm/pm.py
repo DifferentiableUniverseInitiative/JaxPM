@@ -12,6 +12,49 @@ from jaxpm.kernels import (PGD_kernel, compensation_kernel, fftk,
 from jaxpm.painting import paint, readout
 
 
+def _pad_rfft_3d(rk, n, m):
+    """Pad an rFFT field from resolution n to m in Fourier space.
+
+    Matches disco-dj's convention: Nyquist zeroed in all three axes.
+    Scales by (m/n)^3.
+    """
+    hn = n // 2
+    padded = jnp.zeros((m, m, m // 2 + 1), dtype=rk.dtype)
+    padded = padded.at[:hn, :hn, :hn].set(rk[:hn, :hn, :hn])
+    padded = padded.at[:hn, m - hn + 1:m, :hn].set(rk[:hn, hn + 1:n, :hn])
+    padded = padded.at[m - hn + 1:m, :hn, :hn].set(rk[hn + 1:n, :hn, :hn])
+    padded = padded.at[m - hn + 1:m, m - hn + 1:m, :hn].set(rk[hn + 1:n,
+                                                               hn + 1:n, :hn])
+    padded = padded.at[0, 0, 0].set(0)  # Zero DC mode
+    return padded * (m / n)**3
+
+
+def _crop_rfft_3d(rk_ext, n, m):
+    """Crop an rFFT field from resolution m back to n. Scales by (n/m)^3."""
+    hn = n // 2
+    cropped = jnp.zeros((n, n, n // 2 + 1), dtype=rk_ext.dtype)
+    cropped = cropped.at[:hn, :hn, :hn].set(rk_ext[:hn, :hn, :hn])
+    cropped = cropped.at[:hn, hn + 1:n, :hn].set(rk_ext[:hn,
+                                                        m - hn + 1:m, :hn])
+    cropped = cropped.at[hn + 1:n, :hn, :hn].set(rk_ext[m - hn +
+                                                        1:m, :hn, :hn])
+    cropped = cropped.at[hn + 1:n,
+                         hn + 1:n, :hn].set(rk_ext[m - hn + 1:m,
+                                                   m - hn + 1:m, :hn])
+    return cropped * (n / m)**3
+
+
+def _dealiased_product(a, b, n):
+    """Compute a*b with 3/2 dealiasing using rFFT."""
+    m = (3 * n) // 2
+    a_rk = jnp.fft.rfftn(a)
+    b_rk = jnp.fft.rfftn(b)
+    a_ext = jnp.fft.irfftn(_pad_rfft_3d(a_rk, n, m), s=(m, m, m))
+    b_ext = jnp.fft.irfftn(_pad_rfft_3d(b_rk, n, m), s=(m, m, m))
+    product_rk_ext = jnp.fft.rfftn(a_ext * b_ext)
+    return jnp.fft.irfftn(_crop_rfft_3d(product_rk_ext, n, m), s=(n, n, n))
+
+
 def pm_forces(positions,
               mesh_shape=None,
               delta=None,
@@ -21,7 +64,9 @@ def pm_forces(positions,
               sharding=None,
               order='CIC',
               deconvolution=False,
-              initial_particles=None):
+              initial_particles=None,
+              gradient_order=1,
+              laplace_fd=False):
     """
     Computes gravitational forces on particles using a PM scheme.
 
@@ -37,6 +82,11 @@ def pm_forces(positions,
     initial_particles : {None, 'uniform'}
         ``None`` -> ``positions`` are absolute, ``'uniform'`` -> ``positions``
         are displacements from a uniform grid.
+    gradient_order : int
+        Order of the ``gradient_kernel`` used to differentiate the potential
+        (0 = exact ``ik``, 1 = 4th-order finite-difference).
+    laplace_fd : bool
+        Use the finite-difference inverse-Laplace kernel for the Poisson solve.
     paint_absolute_pos : bool, optional
         Deprecated -- use ``initial_particles`` instead (``True`` -> ``None``,
         ``False`` -> ``'uniform'``).
@@ -83,11 +133,11 @@ def pm_forces(positions,
     if deconvolution and delta is None:
         delta_k = delta_k * compensation_kernel(kvec, order)
     # Computes gravitational potential
-    pot_k = delta_k * invlaplace_kernel(kvec) * longrange_kernel(
-        kvec, r_split=r_split)
+    pot_k = delta_k * invlaplace_kernel(
+        kvec, fd=laplace_fd) * longrange_kernel(kvec, r_split=r_split)
     # Computes gravitational forces
     forces = jnp.stack([
-        read_fn(ifft3d(-gradient_kernel(kvec, i) * pot_k),positions
+        read_fn(ifft3d(-gradient_kernel(kvec, i, order=gradient_order) * pot_k),positions
         ) for i in range(3)], axis=-1) # yapf: disable
 
     return forces
@@ -99,10 +149,32 @@ def lpt(cosmo,
         a=0.1,
         halo_size=0,
         sharding=None,
-        order=1):
+        order=1,
+        paint_order='CIC',
+        deconvolution=False,
+        gradient_order=1,
+        laplace_fd=False,
+        dealiased=False,
+        exact_growth=False):
     """
     Computes first and second order LPT displacement and momentum,
     e.g. Eq. 2 and 3 [Jenkins2010](https://arxiv.org/pdf/0910.0258)
+
+    Parameters
+    ----------
+    order : int
+        LPT order (1 or 2).
+    paint_order : int or str
+        Mass-assignment order forwarded to ``pm_forces`` (NGP=1, CIC=2,
+        TSC=3, PCS=4). Affects the force read-out interpolation.
+    deconvolution : bool
+        Forwarded to ``pm_forces``. Inert here because LPT supplies the
+        density directly via ``delta=`` (no particle painting to deconvolve).
+    dealiased : bool
+        Use 3/2 zero-padding to dealias the quadratic 2LPT source term.
+    exact_growth : bool
+        Use exact second-order growth factor coefficient instead of
+        the Einstein-de Sitter approximation 3/7.
     """
     initial_particles = None if particles is not None else 'uniform'
     if particles is None:
@@ -116,41 +188,80 @@ def lpt(cosmo,
                               delta=delta_k,
                               initial_particles=initial_particles,
                               halo_size=halo_size,
-                              sharding=sharding)
+                              sharding=sharding,
+                              order=paint_order,
+                              deconvolution=deconvolution,
+                              gradient_order=gradient_order,
+                              laplace_fd=laplace_fd)
     dx = growth_factor(cosmo, a) * initial_force
     p = a**2 * growth_rate(cosmo, a) * E * dx
     f = a**2 * E * dGfa(cosmo, a) * initial_force
     if order == 2:
         kvec = fftk(delta_k)
-        pot_k = delta_k * invlaplace_kernel(kvec)
+        pot_k = delta_k * invlaplace_kernel(kvec, fd=laplace_fd)
+        n = initial_conditions.shape[0]
 
-        delta2 = 0
-        shear_acc = 0
-        # for i, ki in enumerate(kvec):
-        for i in range(3):
-            # Add products of diagonal terms = 0 + s11*s00 + s22*(s11+s00)...
-            # shear_ii = jnp.fft.irfftn(- ki**2 * pot_k)
-            nabla_i_nabla_i = gradient_kernel(kvec, i)**2
-            shear_ii = ifft3d(nabla_i_nabla_i * pot_k)
-            delta2 += shear_ii * shear_acc
-            shear_acc += shear_ii
+        if dealiased:
+            # Compute shear fields at original resolution
+            shear = {}
+            for i in range(3):
+                nabla_ii = gradient_kernel(kvec, i, order=gradient_order)**2
+                shear[(i, i)] = ifft3d(nabla_ii * pot_k)
+            for i in range(3):
+                for j in range(i + 1, 3):
+                    nabla_ij = gradient_kernel(kvec, i, order=gradient_order) * \
+                        gradient_kernel(kvec, j, order=gradient_order)
+                    shear[(i, j)] = ifft3d(nabla_ij * pot_k)
 
-            # for kj in kvec[i+1:]:
-            for j in range(i + 1, 3):
-                # Substract squared strict-up-triangle terms
-                # delta2 -= jnp.fft.irfftn(- ki * kj * pot_k)**2
-                nabla_i_nabla_j = gradient_kernel(kvec, i) * gradient_kernel(
-                    kvec, j)
-                delta2 -= ifft3d(nabla_i_nabla_j * pot_k)**2
+            # Dealiased products with 3/2 zero-padding
+            delta2 = jnp.zeros_like(initial_conditions)
+            for i in range(3):
+                for j in range(i + 1, 3):
+                    delta2 = delta2 + _dealiased_product(
+                        shear[(i, i)], shear[(j, j)], n)
+                    delta2 = delta2 - _dealiased_product(
+                        shear[(i, j)], shear[(i, j)], n)
+        else:
+            delta2 = 0
+            shear_acc = 0
+            for i in range(3):
+                nabla_i_nabla_i = gradient_kernel(kvec,
+                                                  i,
+                                                  order=gradient_order)**2
+                shear_ii = ifft3d(nabla_i_nabla_i * pot_k)
+                delta2 += shear_ii * shear_acc
+                shear_acc += shear_ii
+
+                for j in range(i + 1, 3):
+                    nabla_i_nabla_j = gradient_kernel(
+                        kvec, i, order=gradient_order) * gradient_kernel(
+                            kvec, j, order=gradient_order)
+                    delta2 -= ifft3d(nabla_i_nabla_j * pot_k)**2
 
         delta_k2 = fft3d(delta2)
         init_force2 = pm_forces(particles,
                                 delta=delta_k2,
                                 initial_particles=initial_particles,
                                 halo_size=halo_size,
-                                sharding=sharding)
-        # NOTE: growth_factor_second is renormalized: - D2 = 3/7 * growth_factor_second
-        dx2 = 3 / 7 * growth_factor_second(cosmo, a) * init_force2
+                                sharding=sharding,
+                                order=paint_order,
+                                deconvolution=deconvolution,
+                                gradient_order=gradient_order,
+                                laplace_fd=laplace_fd)
+
+        if exact_growth:
+            # Compute exact 2LPT coefficient: 3/7 * D1(a_ref)^2 / D2(a_ref)
+            # At early times (matter domination), this gives the exact ratio
+            # |D2_unnorm(1)| / D1_unnorm(1)^2 instead of EdS approx 3/7
+            a_ref = jnp.array(1e-5)
+            D1_ref = growth_factor(cosmo, a_ref)
+            D2_ref = growth_factor_second(cosmo, a_ref)
+            lpt2_coeff = 3. / 7. * D1_ref**2 / D2_ref
+        else:
+            lpt2_coeff = 3. / 7.
+
+        # NOTE: growth_factor_second is renormalized: - D2 = lpt2_coeff * growth_factor_second
+        dx2 = lpt2_coeff * growth_factor_second(cosmo, a) * init_force2
         p2 = a**2 * growth_rate_second(cosmo, a) * E * dx2
         f2 = a**2 * E * dGf2a(cosmo, a) * init_force2
 
