@@ -583,5 +583,5 @@ def readout(grid_mesh,
                                  halo_size=halo_tuple,
                                  order=order),
                          gpu_mesh=gpu_mesh,
-                         in_specs=(spec),
+                         in_specs=(spec, spec),
                          out_specs=spec)(grid_mesh, positions)

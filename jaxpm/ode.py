@@ -211,7 +211,7 @@ def make_diffrax_ode(
 
 def make_neural_ode_fn(model, mesh_shape):
 
-    def neural_nbody_ode(state, a, cosmo: Cosmology, params):
+    def neural_nbody_ode(state, a, cosmo: jc.Cosmology, params):
         """
         state is a tuple (position, velocities)
         """

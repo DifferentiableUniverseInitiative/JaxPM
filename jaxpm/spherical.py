@@ -15,8 +15,8 @@ def _allocate_healpix_map(
     npix = jhp.nside2npix(nside)
     hp_map = jnp.zeros(npix, dtype=dtype)
     if sharding is not None:
-        sharding_1d = jax.sharding.NamedSharding(sharding.mesh,
-                                                 jax.P(sharding.spec[0]))
+        sharding_1d = jax.sharding.NamedSharding(
+            sharding.mesh, jax.sharding.PartitionSpec(sharding.spec[0]))
         hp_map = jax.lax.with_sharding_constraint(hp_map, sharding_1d)
     return hp_map
 
@@ -70,6 +70,9 @@ def paint_particles_spherical_ngp(
 
     # Comoving distance from observer
     r = jnp.linalg.norm(rel_positions, axis=-1)
+
+    if weights is None:
+        weights = jnp.ones_like(r)
 
     # Apply distance cuts - use masking instead of boolean indexing
     distance_mask = (r >= R_min) & (r <= R_max)
@@ -153,6 +156,9 @@ def paint_particles_spherical_bilinear(
 
     # Comoving distance from observer
     r = jnp.linalg.norm(rel_positions, axis=-1)
+
+    if weights is None:
+        weights = jnp.ones_like(r)
 
     # Apply distance cuts using masking (no boolean indexing)
     distance_mask = (r >= R_min) & (r <= R_max)
@@ -268,6 +274,9 @@ def paint_particles_spherical_rbf_neighbor(
 
     # Comoving distance from observer
     r = jnp.linalg.norm(rel_positions, axis=-1)
+
+    if weights is None:
+        weights = jnp.ones_like(r)
 
     # Apply distance cuts using masking (no boolean indexing)
     distance_mask = (r >= R_min) & (r <= R_max)
