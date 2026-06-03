@@ -73,4 +73,4 @@ jobs:
 
     - name: Run Distributed tests
       run: |
-        pytest -v tests/test_distributed_pm.py
+        pytest -v -m "distributed" tests/
