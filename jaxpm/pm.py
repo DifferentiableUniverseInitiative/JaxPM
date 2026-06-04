@@ -151,7 +151,6 @@ def lpt(cosmo,
         sharding=None,
         order=1,
         paint_order='CIC',
-        deconvolution=False,
         gradient_order=1,
         laplace_fd=False,
         dealiased=False,
@@ -167,9 +166,6 @@ def lpt(cosmo,
     paint_order : int or str
         Mass-assignment order forwarded to ``pm_forces`` (NGP=1, CIC=2,
         TSC=3, PCS=4). Affects the force read-out interpolation.
-    deconvolution : bool
-        Forwarded to ``pm_forces``. Inert here because LPT supplies the
-        density directly via ``delta=`` (no particle painting to deconvolve).
     dealiased : bool
         Use 3/2 zero-padding to dealias the quadratic 2LPT source term.
     exact_growth : bool
@@ -190,7 +186,6 @@ def lpt(cosmo,
                               halo_size=halo_size,
                               sharding=sharding,
                               order=paint_order,
-                              deconvolution=deconvolution,
                               gradient_order=gradient_order,
                               laplace_fd=laplace_fd)
     dx = growth_factor(cosmo, a) * initial_force
@@ -245,7 +240,6 @@ def lpt(cosmo,
                                 halo_size=halo_size,
                                 sharding=sharding,
                                 order=paint_order,
-                                deconvolution=deconvolution,
                                 gradient_order=gradient_order,
                                 laplace_fd=laplace_fd)
 

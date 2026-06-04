@@ -92,25 +92,35 @@ def test_forces_orders_finite_and_grad(simulation_config, cosmo, order):
 
 
 # ---------------------------------------------------------------------------
-# Deconvolution is forwarded to paint and changes the forces
+# Deconvolution is forwarded to paint and changes the forces -- but only mildly.
+# This exercises the *active* deconvolution path (delta=None, density painted
+# here), the same one the n-body force loop in ode.py uses. The 1/k^2 Poisson
+# solve damps the high-k that W(k)^-1 boosts, so forces stay finite and bounded
+# comparably to the undeconvolved ones (no runaway, unlike a raw density field).
 # ---------------------------------------------------------------------------
 @pytest.mark.single_device
-def test_forces_deconvolution(simulation_config, cosmo):
+@pytest.mark.parametrize("order", ORDERS)
+def test_forces_deconvolution(simulation_config, cosmo, order):
     mesh_shape, box_shape = simulation_config
     dx = _evolved_displacements(cosmo, mesh_shape, box_shape)
 
     f_raw = pm_forces(dx,
                       mesh_shape=mesh_shape,
-                      order='cic',
+                      order=order,
                       initial_particles='uniform',
                       deconvolution=False)
     f_dec = pm_forces(dx,
                       mesh_shape=mesh_shape,
-                      order='cic',
+                      order=order,
                       initial_particles='uniform',
                       deconvolution=True)
-    assert jnp.all(jnp.isfinite(f_dec))
-    assert float(jnp.max(jnp.abs(f_raw - f_dec))) > 0.0
+    assert jnp.all(jnp.isfinite(f_dec)), order
+    # Deconvolution must actually change the forces ...
+    assert float(jnp.max(jnp.abs(f_raw - f_dec))) > 0.0, order
+    # ... but the Poisson solve keeps it a mild correction, not a blow-up.
+    raw_max = float(jnp.max(jnp.abs(f_raw)))
+    dec_max = float(jnp.max(jnp.abs(f_dec)))
+    assert dec_max < 2.0 * raw_max, (order, raw_max, dec_max)
 
 
 # ---------------------------------------------------------------------------

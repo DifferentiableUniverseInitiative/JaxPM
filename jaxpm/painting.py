@@ -476,6 +476,14 @@ def paint(positions,
     deconvolution : bool
         If True, divide the painted field by the assignment window
         ``compensation_kernel(k, order)`` in Fourier space before returning.
+
+        Warning: this multiplies by ``W(k)^-1``, a high-pass filter, so the
+        returned real-space field is *sharpened* and can go **negative** (Gibbs
+        ringing) -- it is no longer a non-negative density. Use it for
+        Fourier/power-spectrum correction or to feed the Poisson solve (where
+        ``1/k^2`` damps the boosted high-k), **not** as a density to ``log10``
+        or visualise directly. For a real-space density image use
+        ``deconvolution=False``.
     halo_size, sharding :
         Distributed halo width and JAX sharding (machinery unchanged from CIC).
 

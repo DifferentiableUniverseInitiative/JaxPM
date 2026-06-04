@@ -31,7 +31,7 @@ from jax_cosmo.redshift import redshift_distribution
 from jaxpm.distributed import fft3d
 from jaxpm.growth import growth_factor as jpm_growth_factor
 from jaxpm.pm import linear_field, lpt, pm_forces
-from jaxpm.spherical import (paint_particles_spherical,
+from jaxpm.spherical import (deconvolve_map, paint_particles_spherical,
                              spherical_visibility_mask)
 
 # ----------------------
@@ -541,3 +541,124 @@ def test_painting_method_jit_compilation(positions_lpt, method, kwargs):
     assert jnp.sum(painted_map) > 0, f"Zero total mass for {method}"
 
     print(f"   ✅ {method} JIT compilation successful")
+
+
+# ---------------------------------------------------------------------------
+# Window deconvolution (jaxpm.spherical.deconvolve_map)
+# ---------------------------------------------------------------------------
+@pytest.mark.single_device
+def test_deconvolve_bilinear_raises():
+    """Bilinear has no closed-form isotropic window -> must raise (no s2fft needed)."""
+    npix = hp.nside2npix(NSIDE)
+    with pytest.raises(NotImplementedError):
+        deconvolve_map(np.zeros(npix), method="bilinear", nside=NSIDE)
+    # Unknown method is a ValueError
+    with pytest.raises(ValueError):
+        deconvolve_map(np.zeros(npix), method="not_a_method", nside=NSIDE)
+
+
+@pytest.mark.single_device
+@pytest.mark.parametrize("method", ["ngp", "rbf_neighbor"])
+def test_deconvolve_operator_round_trip(method):
+    """Blur a band-limited map by the method's exact window, then recover it.
+
+    This is the rigorous correctness gate for the deconvolution operator: with
+    the analytic window applied forward (pixwin for NGP, pixwin*B_l for RBF),
+    ``deconvolve_map`` must invert it and return the original spectrum.
+    """
+    pytest.importorskip("s2fft")
+    nside = 64
+    lmax = 2 * nside - 1
+    ell = np.arange(lmax + 1)
+
+    # Band-limited reference realisation.
+    m_ref = hp.synfast(1.0 / (ell + 10.0)**2, nside, lmax=lmax, pixwin=False)
+    alm_ref = hp.map2alm(m_ref, lmax=lmax)
+
+    # Forward window: pixwin [* Gaussian beam for RBF, 1-pixel FWHM].
+    W = np.asarray(hp.pixwin(nside, lmax=lmax))
+    kw = {}
+    if method == "rbf_neighbor":
+        fwhm_rad = 1.0 * float(hp.nside2resol(nside))  # 1 pixel FWHM
+        W = W * hp.gauss_beam(fwhm_rad, lmax=lmax)
+        kw = dict(kernel_width_pixels=1.0, smoothing_interpretation="fwhm")
+    m_blur = hp.alm2map(hp.almxfl(alm_ref, W), nside=nside, lmax=lmax)
+
+    rec = np.asarray(
+        deconvolve_map(jnp.asarray(m_blur),
+                       method=method,
+                       nside=nside,
+                       lmax=lmax,
+                       **kw))
+    assert np.all(np.isfinite(rec))
+
+    # Compare recovered vs reference spectrum over a band below the limit.
+    cl_ref = hp.anafast(m_ref, lmax=lmax)
+    cl_rec = hp.anafast(rec, lmax=lmax)
+    band = (ell >= 2) & (ell <= int(1.2 * nside))
+    ratio = cl_rec[band] / cl_ref[band]
+    assert np.all((ratio > 0.9) & (ratio < 1.1)), (method, float(ratio.min()),
+                                                   float(ratio.max()))
+
+
+@pytest.mark.single_device
+@pytest.mark.parametrize("method,kw",
+                         [("ngp", {}),
+                          ("rbf_neighbor", dict(kernel_width_pixels=1.0))])
+def test_deconvolve_default_lmax_finite(method, kw):
+    """The default lmax (=3*nside-1) reaches the small-W_l, large-1/W_l band; the
+    w_floor guard must keep the output finite there (this default is otherwise
+    not exercised, since the other tests pin lmax)."""
+    pytest.importorskip("s2fft")
+    nside = 32
+    m = hp.synfast(1.0 / (np.arange(3 * nside) + 10.0)**2,
+                   nside,
+                   lmax=3 * nside - 1)
+    out = np.asarray(
+        deconvolve_map(jnp.asarray(m), method=method, nside=nside,
+                       **kw))  # no lmax -> default 3*nside-1
+    assert out.shape == (hp.nside2npix(nside), )
+    assert np.all(np.isfinite(out))
+
+
+@pytest.mark.single_device
+def test_deconvolve_painted_map_boosts_high_ell(positions_lpt):
+    """End-to-end sanity: deconvolving a *painted* map boosts small-scale power.
+
+    Dividing by the assignment window (W_l < 1 for l>0) must raise high-l C_l of
+    both NGP and RBF painted maps while staying finite. (Tight spectral recovery
+    is covered by the operator round-trip test; this guards composition with the
+    real painter without a flaky tolerance.)
+    """
+    pytest.importorskip("s2fft")
+    ell = np.arange(LMAX + 1)
+    hi = (ell >= int(0.4 * NSIDE)) & (ell <= int(0.7 * NSIDE))
+
+    def overdensity(m):
+        m = np.asarray(m)
+        return m / np.mean(m) - 1.0
+
+    common = dict(nside=NSIDE,
+                  observer_position=OBSERVER_POSITION,
+                  R_min=R_MIN,
+                  R_max=R_MAX,
+                  box_size=BOX_SIZE,
+                  mesh_shape=MESH_SHAPE)
+
+    for method, kw in [("ngp", {}),
+                       ("rbf_neighbor", dict(kernel_width_pixels=1.0))]:
+        m = paint_particles_spherical(positions_lpt,
+                                      method=method,
+                                      **common,
+                                      **kw)
+        dec = deconvolve_map(overdensity(m),
+                             method=method,
+                             nside=NSIDE,
+                             lmax=LMAX,
+                             **kw)
+        dec = np.asarray(dec)
+        assert np.all(np.isfinite(dec)), method
+        cl_raw = hp.anafast(overdensity(m), lmax=LMAX)
+        cl_dec = hp.anafast(dec, lmax=LMAX)
+        # Window deconvolution amplifies high-l power.
+        assert np.median(cl_dec[hi]) > np.median(cl_raw[hi]), method

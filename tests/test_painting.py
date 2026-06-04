@@ -149,6 +149,77 @@ def test_deconvolution_matches_compensate_cic(simulation_config, cosmo):
     assert_allclose(new, ref, rtol=1e-4, atol=1e-4)
 
 
+# ---------------------------------------------------------------------------
+# Deconvolution invariants. Deconvolution multiplies by the *inverse* assignment
+# window W(k)^-1 -- a high-pass filter that is bounded over k in [-pi, pi) (it
+# never divides by zero). It must stay finite, preserve total mass (W=1 at k=0),
+# and boost small-scale power. It also legitimately drives the real-space field
+# *negative* (Gibbs ringing); that is expected, not a bug to clamp. These guard
+# the failure the notebook surfaced -- log10(field+1) NaNs came from the field
+# going below -1, not from the kernel blowing up.
+# ---------------------------------------------------------------------------
+@pytest.mark.single_device
+@pytest.mark.parametrize("order", ORDERS)
+def test_deconvolution_finite_all_orders(simulation_config, cosmo, order):
+    mesh_shape, box_shape = simulation_config
+    dx = _evolved_displacements(cosmo, mesh_shape, box_shape, a=1.0)
+    field = paint(dx,
+                  initial_particles='uniform',
+                  order=order,
+                  deconvolution=True)
+    # A regression that let the window hit zero (-> inf) or mangled a mode
+    # (-> nan) is caught here.
+    assert jnp.all(jnp.isfinite(field)), order
+
+
+@pytest.mark.single_device
+@pytest.mark.parametrize("order", ORDERS)
+def test_deconvolution_conserves_mass(simulation_config, cosmo, order):
+    mesh_shape, box_shape = simulation_config
+    dx = _evolved_displacements(cosmo, mesh_shape, box_shape, a=1.0)
+    field = paint(dx,
+                  initial_particles='uniform',
+                  order=order,
+                  deconvolution=True)
+    # compensation_kernel == 1 at k=0, so the DC mode (total mass) is untouched.
+    assert_allclose(float(field.sum()), np.prod(mesh_shape), rtol=1e-3), order
+
+
+@pytest.mark.single_device
+@pytest.mark.parametrize("order", ORDERS)
+def test_deconvolution_boosts_high_k(simulation_config, cosmo, order):
+    mesh_shape, box_shape = simulation_config
+    dx = _evolved_displacements(cosmo, mesh_shape, box_shape, a=1.0)
+    raw = paint(dx, initial_particles='uniform', order=order)
+    dec = paint(dx,
+                initial_particles='uniform',
+                order=order,
+                deconvolution=True)
+    ks, pk_raw = power_spectrum(raw, box_shape=box_shape)
+    _, pk_dec = power_spectrum(dec, box_shape=box_shape)
+    ks = np.asarray(ks)
+    knyq = np.pi * min(np.array(mesh_shape) / np.array(box_shape))
+    sel = ks > 0.5 * knyq
+    assert sel.sum() >= 1
+    # W(k)^-1 > 1 for every k != 0, so deconvolved power exceeds raw near Nyquist.
+    assert np.all(np.asarray(pk_dec)[sel] > np.asarray(pk_raw)[sel]), order
+
+
+@pytest.mark.single_device
+def test_deconvolution_may_be_negative(simulation_config, cosmo):
+    # Deconvolution sharpens -> Gibbs ringing -> the real-space field dips below
+    # zero on a clustered field. This is mathematically expected: a deconvolved
+    # field is NOT a density, so do not clamp it inside the library. Pinning this
+    # catches a future "fix" that silently clips to >= 0.
+    mesh_shape, box_shape = simulation_config
+    dx = _evolved_displacements(cosmo, mesh_shape, box_shape, a=1.0)
+    field = paint(dx,
+                  initial_particles='uniform',
+                  order='cic',
+                  deconvolution=True)
+    assert float(field.min()) < 0.0
+
+
 @pytest.mark.single_device
 def test_shotnoise_kernel_formulas():
     k = jnp.linspace(-np.pi, np.pi, 33)

@@ -4,8 +4,53 @@ from typing import Optional, Tuple, Union
 import jax
 import jax.numpy as jnp
 import jax_healpy as jhp
+import numpy as np
 
 Array = jnp.ndarray
+
+
+def _smoothing_sigma_rad(
+    nside: int,
+    kernel_width_arcmin: Optional[float] = None,
+    kernel_width_pixels: Optional[float] = None,
+    smoothing_interpretation: str = "fwhm",
+):
+    """Resolve a smoothing width to a Gaussian ``sigma`` in radians.
+
+    The width may be given in arcminutes (``kernel_width_arcmin``) or in HEALPix
+    pixels (``kernel_width_pixels`` -- a float, so ``0.5`` = half a pixel),
+    the latter converted with the pixel angular scale ``jhp.nside2resol(nside)``.
+    The value is interpreted via ``smoothing_interpretation`` ('fwhm', 'sigma',
+    '2sigma'). If neither width is given, defaults to a half-pixel sigma
+    (``resol / 2``), matching the historical RBF default.
+
+    Shared by :func:`paint_particles_spherical_rbf_neighbor` and
+    :func:`deconvolve_map` so the real-space painting kernel and the harmonic
+    deconvolution beam use the *same* ``sigma`` (and therefore cancel).
+    """
+    if kernel_width_pixels is not None and kernel_width_arcmin is not None:
+        raise ValueError(
+            "Pass only one of kernel_width_pixels or kernel_width_arcmin.")
+
+    if kernel_width_pixels is not None:
+        width_rad = jnp.asarray(kernel_width_pixels) * jnp.asarray(
+            jhp.nside2resol(nside))
+    elif kernel_width_arcmin is not None:
+        width_rad = jnp.asarray(kernel_width_arcmin) * (jnp.pi / 180.0) / 60.0
+    else:
+        # Default: half-pixel sigma (preserves the previous RBF default).
+        return jnp.asarray(jhp.nside2resol(nside)) / 2.0
+
+    if smoothing_interpretation == "fwhm":
+        return width_rad / 2.355
+    elif smoothing_interpretation == "2sigma":
+        return width_rad / 2.0
+    elif smoothing_interpretation == "sigma":
+        return width_rad
+    else:
+        raise ValueError(
+            "smoothing_interpretation must be one of 'fwhm', 'sigma', or '2sigma'"
+        )
 
 
 def _allocate_healpix_map(
@@ -205,6 +250,7 @@ def paint_particles_spherical_rbf_neighbor(
     mesh_shape: Tuple[int, int, int],
     weights: Optional[Array] = None,
     kernel_width_arcmin: Optional[float] = None,
+    kernel_width_pixels: Optional[float] = None,
     smoothing_interpretation: str = "fwhm",
     sharding: Optional[jax.sharding.Sharding] = None,
 ) -> Array:
@@ -230,15 +276,20 @@ def paint_particles_spherical_rbf_neighbor(
         Shape of the simulation mesh (nx, ny, nz)
     weights : ndarray, optional
         Particle weights (default: uniform weights)
-    kernel_width_arcmin : float
+    kernel_width_arcmin : float, optional
         Width of the Gaussian smoothing kernel in arcminutes.
         Larger values → more smoothing (blurrier maps).
         Smaller values → less smoothing (sharper maps).
+    kernel_width_pixels : float, optional
+        Width of the Gaussian smoothing kernel in HEALPix pixels (a float, so
+        ``0.5`` smooths by half a pixel). Converted with ``jhp.nside2resol``.
+        Mutually exclusive with ``kernel_width_arcmin``. If both are None the
+        kernel defaults to a half-pixel sigma.
     smoothing_interpretation : {"fwhm", "sigma", "2sigma"}
-        Interpretation of kernel_width_arcmin:
-        - 'fwhm': kernel_width_arcmin is the full-width at half-maximum
-        - 'sigma': kernel_width_arcmin is the standard deviation
-        - '2sigma': kernel_width_arcmin is 2× the standard deviation
+        Interpretation of the kernel width:
+        - 'fwhm': the width is the full-width at half-maximum
+        - 'sigma': the width is the standard deviation
+        - '2sigma': the width is 2× the standard deviation
     sharding : jax.sharding.Sharding, optional
         Sharding information for distributed computation. If provided, the HEALPix map
         will be allocated with the specified sharding
@@ -248,23 +299,12 @@ def paint_particles_spherical_rbf_neighbor(
     healpix_map : ndarray
         HEALPix density map
     """
-    if kernel_width_arcmin is not None:
-        smoothing_rad = jnp.asarray(kernel_width_arcmin) * (jnp.pi /
-                                                            180.0) / 60.0
-
-        if smoothing_interpretation == "fwhm":
-            sigma = smoothing_rad / 2.355
-        elif smoothing_interpretation == "2sigma":
-            sigma = smoothing_rad / 2.0
-        elif smoothing_interpretation == "sigma":
-            sigma = smoothing_rad
-        else:
-            raise ValueError(
-                "smoothing_interpretation must be one of 'fwhm', 'sigma', or '2sigma'"
-            )
-    else:
-        pixel_scale = jnp.asarray(jhp.nside2resol(nside))
-        sigma = pixel_scale / 2.0
+    sigma = _smoothing_sigma_rad(
+        nside,
+        kernel_width_arcmin=kernel_width_arcmin,
+        kernel_width_pixels=kernel_width_pixels,
+        smoothing_interpretation=smoothing_interpretation,
+    )
 
     # Convert particle positions to physical coordinates
     positions_phys = positions * jnp.array(box_size) / jnp.array(mesh_shape)
@@ -358,6 +398,7 @@ def paint_particles_spherical(
     weights: Optional[Array] = None,
     method: str = "ngp",
     kernel_width_arcmin: Optional[float] = None,
+    kernel_width_pixels: Optional[float] = None,
     smoothing_interpretation: str = "fwhm",
     # High-resolution painting option
     paint_nside: Optional[int] = None,
@@ -392,11 +433,15 @@ def paint_particles_spherical(
         Particle weights (default: uniform weights)
     method (case-insensitive): str
         Painting method: 'ngp', 'bilinear', or 'rbf_neighbor'
-    kernel_width_arcmin : float
+    kernel_width_arcmin : float, optional
         Width of the Gaussian kernel in arcminutes for the RBF method.
         Larger values → more smoothing. Smaller values → less smoothing.
+    kernel_width_pixels : float, optional
+        Width of the Gaussian kernel in HEALPix pixels for the RBF method (a
+        float, so ``0.5`` = half a pixel). Mutually exclusive with
+        ``kernel_width_arcmin``.
     smoothing_interpretation : {"fwhm", "sigma", "2sigma"}
-        Interpretation of kernel_width_arcmin for the RBF method:
+        Interpretation of the RBF kernel width:
         - 'fwhm': full-width at half-maximum
         - 'sigma': standard deviation
         - '2sigma': 2× standard deviation
@@ -469,6 +514,7 @@ def paint_particles_spherical(
             mesh_shape,
             weights=weights,
             kernel_width_arcmin=kernel_width_arcmin,
+            kernel_width_pixels=kernel_width_pixels,
             smoothing_interpretation=smoothing_interpretation,
             sharding=sharding,
         )
@@ -489,6 +535,171 @@ def paint_particles_spherical(
         )
 
     return map_hi
+
+
+@partial(jax.jit,
+         static_argnames=("method", "nside", "lmax", "lcut",
+                          "kernel_width_arcmin", "kernel_width_pixels",
+                          "smoothing_interpretation", "iter"))
+def deconvolve_map(
+    hmap: Array,
+    method: str,
+    nside: int,
+    *,
+    lmax: Optional[int] = None,
+    lcut: Optional[int] = None,
+    kernel_width_arcmin: Optional[float] = None,
+    kernel_width_pixels: Optional[float] = None,
+    smoothing_interpretation: str = "fwhm",
+    iter: int = 0,
+    w_floor: float = 1e-8,
+) -> Array:
+    """Deconvolve the HEALPix mass-assignment window from a painted map.
+
+    Painting particles onto a HEALPix map convolves the field with the
+    assignment window ``W_l``. This removes one factor of that window at the
+    map / ``a_lm`` level: ``map2alm`` → divide ``a_lm`` by ``W_l`` → ``alm2map``.
+
+    Window per method (mirrors ``notebooks/09-Spherical_Deconvolution.ipynb``):
+
+    - ``'ngp'``          : ``W_l = pixwin(nside)`` (the HEALPix pixel window).
+    - ``'rbf_neighbor'`` : ``W_l = pixwin(nside) * B_l`` with the Gaussian beam
+      ``B_l = exp(-l(l+1) sigma^2 / 2)``. ``sigma`` is resolved from the
+      ``kernel_width_*`` arguments by the *same* helper the RBF painter uses, so
+      the painting kernel and this beam cancel -- pass the **same** width you
+      painted with.
+    - ``'bilinear'``     : raises ``NotImplementedError``. Bilinear interpolation's
+      effective window is position-dependent (not isotropic), so there is no
+      closed-form per-``l`` ``B_l`` to divide out; deconvolve it empirically
+      instead (measure ``W_l`` from a reference map -- see the notebook).
+
+    Because ``1/W_l`` diverges as ``W_l → 0`` near the band limit (the spherical
+    analogue of high-k ringing), modes with ``W_l <= w_floor`` are zeroed, and an
+    optional ``lcut`` truncates the inverse window above a safe multipole.
+
+    Parameters
+    ----------
+    hmap : ndarray
+        Input HEALPix map in RING ordering, shape ``(12*nside**2,)``.
+    method : {'ngp', 'rbf_neighbor', 'bilinear'} (case-insensitive)
+        Painting scheme whose window to remove.
+    nside : int
+        HEALPix nside of ``hmap``.
+    lmax : int, optional
+        Maximum multipole. Default ``3*nside - 1`` (pixwin length). Must satisfy
+        ``lmax >= 2*nside - 1`` for the s2fft transform.
+    lcut : int, optional
+        If given, zero the inverse window above ``lcut`` (extra high-l safety).
+    kernel_width_arcmin, kernel_width_pixels, smoothing_interpretation :
+        RBF beam width (used only for ``'rbf_neighbor'``); must match painting.
+        ``kernel_width_pixels`` is in HEALPix pixels (a float; ``0.5`` = half a pixel).
+    iter : int
+        ``map2alm`` iterations. Default 0 (the only value the published
+        ``jax_healpy`` supports; newer builds allow >0 for better accuracy).
+    w_floor : float
+        Modes with ``W_l <= w_floor`` are dropped (avoid 1/0 amplification).
+
+    Returns
+    -------
+    ndarray
+        The deconvolved HEALPix map at ``nside``.
+
+    Notes
+    -----
+    Enable 64-bit (``jax.config.update('jax_enable_x64', True)``) for accurate
+    transforms at high ``l``. The returned field is *sharpened* and may dip
+    slightly negative near the band limit -- it is a window-corrected field, not
+    a strictly non-negative density.
+
+    Examples
+    --------
+    NGP and RBF have closed-form windows, so deconvolution is a single call::
+
+        m_deconv = deconvolve_map(m_ngp, method="ngp", nside=nside, lmax=lmax)
+
+    Bilinear has no analytic window, so estimate it **empirically** from a
+    reference painted with a scheme whose window *is* known (NGP). Both maps see
+    the same underlying field, and the window enters the power spectrum squared,
+    so the bilinear window is ``W_l = pixwin * sqrt(C_l^bilinear / C_l^NGP)``::
+
+        import healpy as hp, numpy as np, jax.numpy as jnp
+        import jax_healpy as jhp
+        from jaxpm.spherical import paint_particles_spherical
+
+        # Paint the same particles two ways (same observer / shell / box).
+        common = dict(nside=nside, observer_position=obs, R_min=R_min,
+                      R_max=R_max, box_size=box_size, mesh_shape=mesh_shape)
+        m_ngp  = paint_particles_spherical(pos, method="ngp",      **common)
+        m_bili = paint_particles_spherical(pos, method="bilinear", **common)
+
+        # Measure both auto-spectra on the overdensity.
+        od = lambda m: np.asarray(m) / np.mean(np.asarray(m)) - 1.0
+        cl_ngp  = hp.anafast(od(m_ngp),  lmax=lmax)
+        cl_bili = hp.anafast(od(m_bili), lmax=lmax)
+
+        # Empirical bilinear window: pixel window x sqrt(power ratio).
+        pix = np.asarray(hp.pixwin(nside, lmax=lmax))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            W = pix * np.sqrt(np.clip(cl_bili / cl_ngp, 0.0, None))
+
+        # Deconvolve: divide a_lm by W_l, with the same high-l guard as above.
+        inv = np.where(W > 1e-8, 1.0 / np.where(W > 1e-8, W, 1.0), 0.0)
+        alm = jhp.map2alm(od(m_bili), lmax=lmax, iter=0) * jnp.asarray(inv)[:, None]
+        m_bili_deconv = jnp.real(jhp.alm2map(alm, nside=nside, lmax=lmax))
+
+    The empirical window is only trustworthy where ``cl_ngp`` is signal- (not
+    shot-noise-) dominated; bin ``W_l`` in ``l`` and cap it with ``lcut`` at high
+    ``l``.
+    """
+    import healpy as hp  # local: only deconvolution needs healpy's pixwin
+
+    method_upper = method.strip().upper()
+    nside = int(nside)
+    if lmax is None:
+        lmax = 3 * nside - 1
+    lmax = int(lmax)
+
+    # Host-side window W_l (static in nside/lmax/width): pixwin [* Gaussian beam].
+    W = np.asarray(hp.pixwin(nside, lmax=lmax), dtype=np.float64)
+    if method_upper == "NGP":
+        pass
+    elif method_upper == "RBF_NEIGHBOR":
+        sigma = float(
+            _smoothing_sigma_rad(
+                nside,
+                kernel_width_arcmin=kernel_width_arcmin,
+                kernel_width_pixels=kernel_width_pixels,
+                smoothing_interpretation=smoothing_interpretation,
+            ))
+        ell = np.arange(W.shape[0])
+        W = W * np.exp(-ell * (ell + 1) * sigma**2 / 2.0)
+    elif method_upper == "BILINEAR":
+        raise NotImplementedError(
+            "Bilinear painting has no closed-form deconvolution: its effective "
+            "window is position-dependent (not isotropic), so there is no single "
+            "B_l to divide out. Deconvolve it empirically instead: paint the same "
+            "particles with NGP, measure both auto-spectra, and use "
+            "W_l = pixwin * sqrt(cl_bilinear / cl_ngp) as the window (the sqrt is "
+            "because the window enters the power spectrum squared). See the "
+            "'Examples' section of deconvolve_map's docstring for runnable code."
+        )
+    else:
+        raise ValueError(
+            f"Unknown method '{method}'. Choose 'ngp', 'rbf_neighbor', or "
+            "'bilinear'.")
+
+    # Inverse window with the high-l blow-up guard.
+    safe = W > w_floor
+    inv = np.where(safe, 1.0 / np.where(safe, W, 1.0), 0.0)
+    if lcut is not None:
+        inv[int(lcut) + 1:] = 0.0
+    inv = jnp.asarray(inv)
+
+    # Harmonic-space deconvolution (jax_healpy transforms; almxfl applied inline).
+    alm = jhp.map2alm(hmap, lmax=lmax, iter=int(iter))
+    alm = alm * inv[:, None]  # s2fft ordering (L, 2L-1): broadcast W_l over m
+    # jnp.real: some jax_healpy builds return a complex map with ~1e-16 imag noise.
+    return jnp.real(jhp.alm2map(alm, nside=nside, lmax=lmax))
 
 
 @partial(jax.jit, static_argnames=("nside", ))
