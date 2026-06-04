@@ -32,14 +32,18 @@ def _smoothing_sigma_rad(
         raise ValueError(
             "Pass only one of kernel_width_pixels or kernel_width_arcmin.")
 
+    # nside is a static argument in both callers, so the pixel scale is a concrete
+    # host float. Using plain arithmetic (no jnp.asarray) keeps the result a Python
+    # float for concrete widths -- so deconvolve_map can take float(sigma) under
+    # jit -- while still tracing through a *traced* width in the painter.
+    resol = float(jhp.nside2resol(nside))
     if kernel_width_pixels is not None:
-        width_rad = jnp.asarray(kernel_width_pixels) * jnp.asarray(
-            jhp.nside2resol(nside))
+        width_rad = kernel_width_pixels * resol
     elif kernel_width_arcmin is not None:
-        width_rad = jnp.asarray(kernel_width_arcmin) * (jnp.pi / 180.0) / 60.0
+        width_rad = kernel_width_arcmin * (np.pi / 180.0) / 60.0
     else:
         # Default: half-pixel sigma (preserves the previous RBF default).
-        return jnp.asarray(jhp.nside2resol(nside)) / 2.0
+        return resol / 2.0
 
     if smoothing_interpretation == "fwhm":
         return width_rad / 2.355
@@ -688,12 +692,14 @@ def deconvolve_map(
             f"Unknown method '{method}'. Choose 'ngp', 'rbf_neighbor', or "
             "'bilinear'.")
 
-    # Inverse window with the high-l blow-up guard.
+    # Inverse window with the high-l blow-up guard. Built with jnp so a *traced*
+    # w_floor works under jit; ``W`` is a compile-time constant (static nside/lmax/
+    # width) and ``lcut`` is static, so the slice update is also constant-folded.
+    W = jnp.asarray(W)
     safe = W > w_floor
-    inv = np.where(safe, 1.0 / np.where(safe, W, 1.0), 0.0)
+    inv = jnp.where(safe, 1.0 / jnp.where(safe, W, 1.0), 0.0)
     if lcut is not None:
-        inv[int(lcut) + 1:] = 0.0
-    inv = jnp.asarray(inv)
+        inv = inv.at[int(lcut) + 1:].set(0.0)
 
     # Harmonic-space deconvolution (jax_healpy transforms; almxfl applied inline).
     alm = jhp.map2alm(hmap, lmax=lmax, iter=int(iter))
