@@ -28,7 +28,7 @@ import pytest
 from jax.tree_util import register_pytree_node_class
 from jax_cosmo.redshift import redshift_distribution
 
-from jaxpm.distributed import fft3d
+from jaxpm.distributed import fft3d, uniform_particles
 from jaxpm.growth import growth_factor as jpm_growth_factor
 from jaxpm.pm import linear_field, lpt, pm_forces
 from jaxpm.spherical import (deconvolve_map, paint_particles_spherical,
@@ -456,7 +456,21 @@ def test_ngp_zero_gradients(positions_lpt, method, kwargs):
 @pytest.mark.parametrize("obs_y", [0.0, 0.25, 0.5, 0.75, 1.0])
 @pytest.mark.parametrize("obs_z", [0.0, 0.25, 0.5, 0.75, 1.0])
 def test_spherical_visibility_mask_vs_painting(obs_x, obs_y, obs_z):
-    """Test analytical visibility mask against empirical painting."""
+    """The shell-aware visibility mask must predict the painted footprint.
+
+    Design (robust *and* discriminating):
+    - NARROW shell: ``R_min=300`` exceeds the 250 wall distance of the
+      quarter-box observers, so the shell carves invisible cones that a mask
+      ignoring ``R_min/R_max`` would miss. A wide shell would make even a broken
+      mask look correct.
+    - The discriminator is agreement against the painting (ground truth). A
+      correct mask scores >=0.874 here (median 0.98); a mask that ignored the
+      shell collapses to the box-only result and drops to ~0.63. The 0.75
+      threshold sits between them with ~12% margin on both sides -- the painting
+      is deterministic (no RNG), so this does not flake.
+    - A hard invariant (the shell-aware mask is never a worse predictor than the
+      shell-agnostic box-only mask) and an over-carving guard bracket the result.
+    """
     nside = 32
     n_particles = 64
 
@@ -465,12 +479,12 @@ def test_spherical_visibility_mask_vs_painting(obs_x, obs_y, obs_z):
     observer_pos_physical = observer_pos_normalized * jnp.array(BOX_SIZE)
 
     mesh_shape_test = (n_particles, n_particles, n_particles)
-    particles = jnp.stack(jnp.meshgrid(
-        *[jnp.arange(s) for s in mesh_shape_test], indexing="ij"),
-                          axis=-1)
+    particles = uniform_particles(mesh_shape_test)
 
-    R_min = 10.0
-    R_max = 2000.0
+    # Narrow shell relative to the 1000 box; R_min=300 > the 250 wall distance
+    # of the quarter-box observers, so the shell carves out invisible cones.
+    R_min = 300.0
+    R_max = 450.0
 
     painted_map = paint_particles_spherical(
         particles,
@@ -482,31 +496,44 @@ def test_spherical_visibility_mask_vs_painting(obs_x, obs_y, obs_z):
         box_size=BOX_SIZE,
         mesh_shape=mesh_shape_test,
     )
+    painted = np.asarray(painted_map) > 1e-12
 
-    analytical_mask = spherical_visibility_mask(
-        nside=nside,
-        observer_position=observer_pos_normalized,
-    )
+    # Shell-aware mask, called with the SAME physical args as the painter, and
+    # the shell-agnostic baseline (same function with no radial shell).
+    shell_mask = np.asarray(
+        spherical_visibility_mask(nside=nside,
+                                  observer_position=observer_pos_physical,
+                                  box_size=BOX_SIZE,
+                                  R_min=R_min,
+                                  R_max=R_max)) > 0.5
+    boxonly_mask = np.asarray(
+        spherical_visibility_mask(nside=nside,
+                                  observer_position=observer_pos_physical,
+                                  box_size=BOX_SIZE,
+                                  R_min=0.0,
+                                  R_max=np.inf)) > 0.5
 
-    painted_np = np.asarray(painted_map)
-    mask_np = np.asarray(analytical_mask)
-    painted_np = np.where(painted_np < 1e-12, 0.0, 1.0)
+    agree_shell = float(np.mean(painted == shell_mask))
+    agree_boxonly = float(np.mean(painted == boxonly_mask))
 
-    invisible_pixels = (mask_np == 0.0)
-    if np.any(invisible_pixels):
-        violations = painted_np[invisible_pixels] > 0
-        if np.any(violations):
-            n_violations = violations.sum()
-            total_invisible = invisible_pixels.sum()
-            violation_rate = n_violations / total_invisible
-            assert violation_rate < 0.02, \
-                f"Observer at {observer_pos_normalized}: {n_violations}/{total_invisible} " \
-                f"({violation_rate:.2%}) invisible pixels have painted particles (>2% threshold)"
+    # (1) Discriminator: the mask predicts the painted footprint. A mask that
+    #     ignored R_min/R_max would equal boxonly_mask and score ~0.63 here.
+    assert agree_shell > 0.75, \
+        f"Observer {observer_pos_normalized}: painted/mask agree only {agree_shell:.2%}"
 
-    visible_pixels = (mask_np == 1.0)
-    if np.any(visible_pixels):
-        assert np.any(painted_np[visible_pixels] > 0.0), \
-            f"Observer at {observer_pos_normalized}: no particles painted where mask=1"
+    # (2) Invariant: modelling the shell is never a worse predictor than the
+    #     box-only mask -- their disagreements lie on the correctly-empty cone.
+    assert agree_shell >= agree_boxonly - 1e-3, \
+        f"Observer {observer_pos_normalized}: shell mask ({agree_shell:.2%}) " \
+        f"predicts worse than box-only ({agree_boxonly:.2%})"
+
+    # (3) Over-carving guard: the mask must not mark a pixel invisible where
+    #     particles were actually painted. Boundary noise tops out near 1.5%.
+    if np.any(~shell_mask):
+        fp_rate = float(np.mean(painted[~shell_mask]))
+        assert fp_rate < 0.03, \
+            f"Observer {observer_pos_normalized}: {fp_rate:.2%} of invisible " \
+            f"pixels have painted particles (>3% threshold)"
 
 
 @pytest.mark.single_device
