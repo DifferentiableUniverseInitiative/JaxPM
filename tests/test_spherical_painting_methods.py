@@ -116,7 +116,7 @@ def positions_lpt():
     k = jnp.logspace(-4, 1, 128)
     pk = jc.power.linear_matter_power(
         jc.Planck15(Omega_c=OMEGA_C, sigma8=SIGMA_8), k)
-    pk_fn = lambda x: jnp.interp(x.reshape([-1]), k, pk).reshape(x.shape)
+    pk_fn = lambda x: jnp.interp(x, k, pk)
 
     # Generate initial conditions
     initial_conditions = linear_field(MESH_SHAPE, BOX_SIZE, pk_fn, seed=key)
