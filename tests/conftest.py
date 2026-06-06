@@ -91,7 +91,7 @@ def fpm_initial_conditions(cosmo, particle_mesh):
     pk = jc.power.linear_matter_power(cosmo, k)
 
     def pk_fn(x):
-        return jnp.interp(x.reshape([-1]), k, pk).reshape(x.shape)
+        return jnp.interp(x, k, pk)
 
     whitec = particle_mesh.generate_whitenoise(42,
                                                type='complex',

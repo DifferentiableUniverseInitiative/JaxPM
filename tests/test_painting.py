@@ -35,7 +35,7 @@ def _evolved_displacements(cosmo,
     aliased shot noise is actually present (a lattice IC suppresses it)."""
     k = jnp.logspace(-3, 1, 128)
     pk = jc.power.linear_matter_power(cosmo, k)
-    pk_fn = lambda x: jnp.interp(x.reshape(-1), k, pk).reshape(x.shape)
+    pk_fn = lambda x: jnp.interp(x, k, pk)
     ic = linear_field(mesh_shape,
                       box_shape,
                       pk_fn,

@@ -710,18 +710,39 @@ def deconvolve_map(
 
 @partial(jax.jit, static_argnames=("nside", ))
 def spherical_visibility_mask(
-        nside: int,
-        observer_position: Array,  # normalized coords in [0,1]^3
+    nside: int,
+    observer_position: Array,
+    box_size: Union[float, Array, jnp.ndarray] = 1.0,
+    R_min: float = 0.0,
+    R_max: float = jnp.inf,
 ) -> Array:
     """
-    Geometric visibility mask using only nside and observer_position.
+    Geometric visibility mask for spherical shell painting.
 
-    Assumptions
-    -----------
-    - Simulation volume is the unit cube [0,1]^3 (axis-aligned).
-    - observer_position is given in normalized coordinates.
-    - A pixel is 'visible' if a ray from the observer through that pixel's
-      direction hits the cube for some t > 0.
+    A pixel is 'visible' (i.e. it would receive particles from a uniformly
+    filled box) iff the radial segment ``[R_min, R_max]`` along that pixel's
+    direction, starting from the observer, intersects the axis-aligned box
+    ``[0, box_size]^3``.
+
+    This mirrors the geometry of :func:`paint_particles_spherical`: the painter
+    keeps only particles whose distance from the observer lies in
+    ``[R_min, R_max]``, so a direction is visible exactly when the box overlaps
+    that shell. All of ``observer_position``, ``box_size``, ``R_min`` and
+    ``R_max`` are expressed in the same physical units used by the painter.
+
+    Parameters
+    ----------
+    nside : int
+        HEALPix nside parameter.
+    observer_position : ndarray, shape (3,)
+        Observer position in the same (physical) coordinates as the box.
+    box_size : float or array, optional
+        Size of the simulation box. Scalar or per-axis (3,). The box is assumed
+        axis-aligned with origin at 0, i.e. ``[0, box_size]^3``. Default 1.0.
+    R_min, R_max : float, optional
+        Minimum and maximum comoving distance of the shell. Defaults
+        ``R_min=0``, ``R_max=inf`` reduce the mask to the pure
+        "ray hits the box" test.
 
     Returns
     -------
@@ -729,14 +750,12 @@ def spherical_visibility_mask(
         1.0 where visible, 0.0 otherwise.
     """
     obs = jnp.asarray(observer_position, dtype=jnp.float32)  # (3,)
-    obs = jnp.clip(obs, 0.0, 1.0)
+    bmax = jnp.broadcast_to(jnp.asarray(box_size, jnp.float32), (3, ))  # (3,)
     bmin = jnp.zeros((3, ), dtype=jnp.float32)
-    bmax = jnp.ones((3, ), dtype=jnp.float32)
 
     npix = jhp.nside2npix(nside)
-    ipix = jnp.arange(npix, dtype=jnp.int64)
     # Pixel center directions (unit vectors), shape (npix, 3)
-    dirs = jhp.pix2vec(nside, ipix)
+    dirs = jhp.pix2vec(nside, jnp.arange(npix))
 
     # Robust slab intersection (vectorized).
     # For axes where dir == 0, treat as parallel: if obs is inside the slab,
@@ -750,9 +769,16 @@ def spherical_visibility_mask(
     t2 = jnp.where(dir_nz, (bmax - obs) / dirs,
                    jnp.where(inside_axis, jnp.inf, -jnp.inf))
 
-    tmin = jnp.max(jnp.minimum(t1, t2), axis=-1)  # (npix,)
-    tmax = jnp.min(jnp.maximum(t1, t2), axis=-1)  # (npix,)
+    tmin = jnp.max(jnp.minimum(t1, t2), axis=-1)  # entry distance (npix,)
+    tmax = jnp.min(jnp.maximum(t1, t2), axis=-1)  # exit distance  (npix,)
 
-    # Visible if the forward ray intersects: tmax >= max(tmin, 0)
-    visible = tmax > jnp.maximum(tmin, jnp.float32(0.0))
+    # The forward ray inside the box spans [max(tmin, 0), tmax]. The pixel is
+    # visible iff that segment shares a positive-length overlap with the shell
+    # [R_min, R_max]. Since R_min >= 0, `lo` is already clamped to t >= 0, and
+    # the strict `<` rejects measure-zero grazing hits (e.g. a corner observer
+    # looking away from the box). With the defaults (R_min=0, R_max=inf) this
+    # reduces exactly to the bare "forward ray hits the box" test.
+    lo = jnp.maximum(tmin, jnp.asarray(R_min, jnp.float32))
+    hi = jnp.minimum(tmax, jnp.asarray(R_max, jnp.float32))
+    visible = lo < hi
     return visible.astype(jnp.float32)
