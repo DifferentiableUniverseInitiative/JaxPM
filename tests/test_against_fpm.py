@@ -5,8 +5,9 @@ from jax import numpy as jnp
 from numpy.testing import assert_allclose
 
 from jaxpm.distributed import uniform_particles
+from jaxpm.ode import make_diffrax_ode
 from jaxpm.painting import cic_paint, cic_paint_dx
-from jaxpm.pm import lpt, make_diffrax_ode
+from jaxpm.pm import lpt
 from jaxpm.utils import power_spectrum
 
 _TOLERANCE = 1e-4
@@ -21,7 +22,7 @@ def test_lpt_absolute(simulation_config, initial_conditions, lpt_scale_factor,
                       fpm_lpt1_field, fpm_lpt2_field, cosmo, order):
 
     mesh_shape, box_shape = simulation_config
-    cosmo._workspace = {}
+
     particles = uniform_particles(mesh_shape)
 
     # Initial displacement
@@ -50,7 +51,7 @@ def test_lpt_relative(simulation_config, initial_conditions, lpt_scale_factor,
                       fpm_lpt1_field, fpm_lpt2_field, cosmo, order):
 
     mesh_shape, box_shape = simulation_config
-    cosmo._workspace = {}
+
     # Initial displacement
     dx, _, _ = lpt(cosmo, initial_conditions, a=lpt_scale_factor, order=order)
 
@@ -75,7 +76,7 @@ def test_nbody_absolute(simulation_config, initial_conditions,
                         cosmo, order):
 
     mesh_shape, box_shape = simulation_config
-    cosmo._workspace = {}
+
     particles = uniform_particles(mesh_shape)
 
     # Initial displacement
@@ -129,7 +130,6 @@ def test_nbody_relative(simulation_config, initial_conditions,
                         cosmo, order):
 
     mesh_shape, box_shape = simulation_config
-    cosmo._workspace = {}
 
     # Initial displacement
     dx, p, _ = lpt(cosmo, initial_conditions, a=lpt_scale_factor, order=order)

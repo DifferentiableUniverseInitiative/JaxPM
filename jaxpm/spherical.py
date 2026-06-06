@@ -8,7 +8,20 @@ import jax_healpy as jhp
 Array = jnp.ndarray
 
 
-@partial(jax.jit, static_argnames=("nside", ))
+def _allocate_healpix_map(
+        nside: int,
+        dtype=jnp.float32,
+        sharding: Optional[jax.sharding.Sharding] = None) -> Array:
+    npix = jhp.nside2npix(nside)
+    hp_map = jnp.zeros(npix, dtype=dtype)
+    if sharding is not None:
+        sharding_1d = jax.sharding.NamedSharding(sharding.mesh,
+                                                 jax.P(sharding.spec[0]))
+        hp_map = jax.lax.with_sharding_constraint(hp_map, sharding_1d)
+    return hp_map
+
+
+@partial(jax.jit, static_argnames=("nside", "sharding"))
 def paint_particles_spherical_ngp(
     positions: Array,
     nside: int,
@@ -18,6 +31,7 @@ def paint_particles_spherical_ngp(
     box_size: Union[float, Array, jnp.ndarray],
     mesh_shape: Tuple[int, int, int],
     weights: Optional[Array] = None,
+    sharding: Optional[jax.sharding.Sharding] = None,
 ) -> Array:
     """
     Paint particles onto HEALPix spherical maps using Nearest Grid Point (NGP) scheme.
@@ -40,15 +54,14 @@ def paint_particles_spherical_ngp(
         Shape of the simulation mesh (nx, ny, nz)
     weights : ndarray, optional
         Particle weights (default: uniform weights)
-
+    sharding : jax.sharding.Sharding, optional
+        Sharding information for distributed computation. If provided, the HEALPix map
+        will be allocated with the specified sharding
     Returns
     -------
     healpix_map : ndarray
         HEALPix density map
     """
-    if weights is None:
-        weights = jnp.ones(positions.shape[:-1])
-
     # Convert particle positions to physical coordinates
     positions_phys = positions * jnp.array(box_size) / jnp.array(mesh_shape)
 
@@ -56,33 +69,30 @@ def paint_particles_spherical_ngp(
     rel_positions = positions_phys - jnp.asarray(observer_position)
 
     # Comoving distance from observer
-    r = jnp.sqrt(jnp.sum(rel_positions**2, axis=-1))
+    r = jnp.linalg.norm(rel_positions, axis=-1)
 
     # Apply distance cuts - use masking instead of boolean indexing
     distance_mask = (r >= R_min) & (r <= R_max)
 
-    # Flatten arrays for processing (keep static shapes)
-    rel_positions_flat = rel_positions.reshape(-1, 3)
-    r_flat = r.flatten()
-    weights_flat = weights.flatten()
-    distance_mask_flat = distance_mask.flatten()
-
-    # Apply mask to weights (static shape preserved)
-    masked_weights = jnp.where(distance_mask_flat, weights_flat, 0.0)
+    # Apply mask to weights (original shape preserved)
+    masked_weights = jnp.where(distance_mask, weights, 0.0)
 
     # Safe division to avoid division by zero
-    r_safe = jnp.where(r_flat > 1e-10, r_flat, 1e-10)
-    unit_vecs = rel_positions_flat / r_safe[..., None]
+    r_safe = jnp.where(r > 1e-10, r, 1e-10)
+    unit_vecs = rel_positions / r_safe[..., None]
 
-    # Convert unit vectors to angles using jax_healpy
+    # Convert unit vectors to angles using jax_healpy (preserves batch shape)
     theta, phi = jhp.vec2ang(unit_vecs)
 
-    # Convert to HEALPix pixel indices
+    # Convert to HEALPix pixel indices (preserves batch shape)
     pixels = jhp.ang2pix(nside, theta, phi)
 
-    # Bin particles into HEALPix pixels
+    # Bin particles into HEALPix pixels (flatten here for bincount)
     npix = jhp.nside2npix(nside)
-    healpix_map = jnp.bincount(pixels, weights=masked_weights, length=npix)
+    healpix_map = _allocate_healpix_map(nside,
+                                        dtype=masked_weights.dtype,
+                                        sharding=sharding)
+    healpix_map = healpix_map.at[pixels].add(masked_weights)
 
     # Calculate volume per pixel in spherical shell (exact shell volume)
     pixel_solid_angle = 4 * jnp.pi / npix  # steradians per pixel
@@ -92,7 +102,7 @@ def paint_particles_spherical_ngp(
     return healpix_map / shell_volume_per_pixel
 
 
-@partial(jax.jit, static_argnames=("nside", ))
+@partial(jax.jit, static_argnames=("nside", "sharding"))
 def paint_particles_spherical_bilinear(
     positions: Array,
     nside: int,
@@ -102,6 +112,7 @@ def paint_particles_spherical_bilinear(
     box_size: Union[float, Array, jnp.ndarray],
     mesh_shape: Tuple[int, int, int],
     weights: Optional[Array] = None,
+    sharding: Optional[jax.sharding.Sharding] = None,
 ) -> Array:
     """
     Paint particles onto HEALPix spherical maps using bilinear interpolation.
@@ -125,15 +136,15 @@ def paint_particles_spherical_bilinear(
         Shape of the simulation mesh (nx, ny, nz)
     weights : ndarray, optional
         Particle weights (default: uniform weights)
+    sharding : jax.sharding.Sharding, optional
+        Sharding information for distributed computation. If provided, the HEALPix map
+        will be allocated with the specified sharding
 
     Returns
     -------
     healpix_map : ndarray
         HEALPix density map
     """
-    if weights is None:
-        weights = jnp.ones(positions.shape[:-1])
-
     # Convert particle positions to physical coordinates
     positions_phys = positions * jnp.array(box_size) / jnp.array(mesh_shape)
 
@@ -141,36 +152,33 @@ def paint_particles_spherical_bilinear(
     rel_positions = positions_phys - jnp.asarray(observer_position)
 
     # Comoving distance from observer
-    r = jnp.sqrt(jnp.sum(rel_positions**2, axis=-1))
+    r = jnp.linalg.norm(rel_positions, axis=-1)
 
     # Apply distance cuts using masking (no boolean indexing)
     distance_mask = (r >= R_min) & (r <= R_max)
 
-    # Flatten arrays (keep static shapes)
-    rel_positions_flat = rel_positions.reshape(-1, 3)
-    r_flat = r.flatten()
-    weights_flat = weights.flatten()
-    distance_mask_flat = distance_mask.flatten()
-
-    # Apply mask to weights (static shape preserved)
-    masked_weights = jnp.where(distance_mask_flat, weights_flat, 0.0)
+    # Apply mask to weights (original shape preserved)
+    masked_weights = jnp.where(distance_mask, weights, 0.0)
 
     # Safe division to avoid division by zero
-    r_safe = jnp.where(r_flat > 1e-10, r_flat, 1e-10)
-    unit_vecs = rel_positions_flat / r_safe[..., None]
+    r_safe = jnp.where(r > 1e-10, r, 1e-10)
+    unit_vecs = rel_positions / r_safe[..., None]
 
-    # Convert unit vectors to spherical coordinates
+    # Convert unit vectors to spherical coordinates (preserves batch shape)
     theta, phi = jhp.vec2ang(unit_vecs)
 
-    # Get bilinear interpolation weights and pixel indices
+    # Get bilinear interpolation weights and pixel indices: (4, *batch)
     pixels, interp_weights = jhp.get_interp_weights(nside, theta, phi)
 
     # Initialize HEALPix map
     npix = jhp.nside2npix(nside)
-    healpix_map = jnp.zeros(npix)
+    healpix_map = _allocate_healpix_map(nside,
+                                        dtype=masked_weights.dtype,
+                                        sharding=sharding)
 
-    contributions = interp_weights * masked_weights[None, :]
-    # Calculate contributions for each of the 4 nearest pixels
+    # interp_weights: (4, *batch), masked_weights: (*batch,) broadcasts to (4, *batch)
+    contributions = interp_weights * masked_weights
+    # Scatter contributions (flatten for at[].add — communication unavoidable)
     healpix_map = healpix_map.at[pixels].add(contributions)
 
     # Apply shell-volume normalization
@@ -179,7 +187,8 @@ def paint_particles_spherical_bilinear(
     return healpix_map / shell_vol_per_pix
 
 
-@partial(jax.jit, static_argnames=("nside", "smoothing_interpretation"))
+@partial(jax.jit,
+         static_argnames=("nside", "smoothing_interpretation", "sharding"))
 def paint_particles_spherical_rbf_neighbor(
     positions: Array,
     nside: int,
@@ -191,6 +200,7 @@ def paint_particles_spherical_rbf_neighbor(
     weights: Optional[Array] = None,
     kernel_width_arcmin: Optional[float] = None,
     smoothing_interpretation: str = "fwhm",
+    sharding: Optional[jax.sharding.Sharding] = None,
 ) -> Array:
     """
     Paint particles onto HEALPix spherical maps using RBF with fixed neighbor stencil.
@@ -223,15 +233,15 @@ def paint_particles_spherical_rbf_neighbor(
         - 'fwhm': kernel_width_arcmin is the full-width at half-maximum
         - 'sigma': kernel_width_arcmin is the standard deviation
         - '2sigma': kernel_width_arcmin is 2× the standard deviation
+    sharding : jax.sharding.Sharding, optional
+        Sharding information for distributed computation. If provided, the HEALPix map
+        will be allocated with the specified sharding
 
     Returns
     -------
     healpix_map : ndarray
         HEALPix density map
     """
-    if weights is None:
-        weights = jnp.ones(positions.shape[:-1])
-
     if kernel_width_arcmin is not None:
         smoothing_rad = jnp.asarray(kernel_width_arcmin) * (jnp.pi /
                                                             180.0) / 60.0
@@ -257,41 +267,35 @@ def paint_particles_spherical_rbf_neighbor(
     rel_positions = positions_phys - jnp.asarray(observer_position)
 
     # Comoving distance from observer
-    r = jnp.sqrt(jnp.sum(rel_positions**2, axis=-1))
+    r = jnp.linalg.norm(rel_positions, axis=-1)
 
     # Apply distance cuts using masking (no boolean indexing)
     distance_mask = (r >= R_min) & (r <= R_max)
 
-    # Flatten arrays (keep static shapes)
-    rel_positions_flat = rel_positions.reshape(-1, 3)
-    r_flat = r.flatten()
-    weights_flat = weights.flatten()
-    distance_mask_flat = distance_mask.flatten()
-
-    # Apply mask to weights (static shape preserved)
-    masked_weights = jnp.where(distance_mask_flat, weights_flat, 0.0)
+    # Apply mask to weights (original shape preserved)
+    masked_weights = jnp.where(distance_mask, weights, 0.0)
 
     # Safe division to avoid division by zero
-    r_safe = jnp.where(r_flat > 1e-10, r_flat, 1e-10)
-    unit_vecs = rel_positions_flat / r_safe[..., None]
+    r_safe = jnp.where(r > 1e-10, r, 1e-10)
+    unit_vecs = rel_positions / r_safe[..., None]
 
-    # Convert unit vectors to spherical coordinates
+    # Convert unit vectors to spherical coordinates (preserves batch shape)
     theta, phi = jhp.vec2ang(unit_vecs)
 
-    # Get 9-pixel stencils: center + 8 neighbors
+    # Get 9-pixel stencils: center + 8 neighbors -> (9, *batch)
     pix9 = jhp.get_all_neighbours(nside,
                                   theta,
                                   phi,
                                   nest=False,
                                   get_center=True)
 
-    # Get unit vectors for all 9 pixels
-    flat_pix = pix9.reshape(-1)
-    vecs = jhp.pix2vec(nside, flat_pix).reshape(9, -1, 3)
+    # Get unit vectors for all 9 pixels -> (9, *batch, 3)
+    vecs = jhp.pix2vec(nside, pix9)
     # NaNs can arise for neighbors with index -1 (non-existent); keep vectors but mask later.
     vecs = jnp.nan_to_num(vecs)
-    # Compute angular separations for all (neighbor, particle) pairs
-    dots = jnp.einsum("ij,kij->ki", unit_vecs, vecs)
+
+    # Compute angular separations: (*batch, 3) broadcasts with (9, *batch, 3) -> sum over axis=-1 -> (9, *batch)
+    dots = jnp.sum(unit_vecs * vecs, axis=-1)
     gamma = jnp.arccos(jnp.clip(dots, -1.0, 1.0))
 
     # Gaussian kernel weights
@@ -301,26 +305,28 @@ def paint_particles_spherical_rbf_neighbor(
     # Mask invalid neighbors (pix == -1) and renormalize per particle to conserve mass
     valid_mask = (pix9 != -1)
     kernel_weights_masked = jnp.where(valid_mask, kernel_weights, 0.0)
-    weight_sum = jnp.sum(kernel_weights_masked, axis=0)
+    weight_sum = jnp.sum(kernel_weights_masked, axis=0)  # (*batch,)
     # Safe normalization: if no valid neighbors, keep zeros
-    norm_kernel = jnp.where(weight_sum[None, :] > 0.0,
-                            kernel_weights_masked / weight_sum[None, :], 0.0)
+    norm_kernel = jnp.where(weight_sum[None, ...] > 0.0,
+                            kernel_weights_masked / weight_sum[None, ...], 0.0)
 
     # Initialize HEALPix map size
     npix = jhp.nside2npix(nside)
 
     # Weight by particle weight; kernel sums to 1 per particle
     pixel_area = 4.0 * jnp.pi / npix
-    contrib = norm_kernel * masked_weights[None, :]
+    # masked_weights: (*batch,) broadcasts with (9, *batch)
+    contrib = norm_kernel * masked_weights
 
     # Scatter contributions into a map
-    idx = pix9.reshape(-1)
-    val = contrib.reshape(-1)
     # Avoid negative indices by zeroing their contributions and redirecting index to 0
-    valid_flat = (idx != -1)
-    idx_safe = jnp.where(valid_flat, idx, 0)
-    val_safe = jnp.where(valid_flat, val, 0.0)
-    healpix_map = jnp.zeros(npix).at[idx_safe].add(val_safe)
+    valid = (pix9 != -1)
+    idx_safe = jnp.where(valid, pix9, 0)
+    val_safe = jnp.where(valid, contrib, 0.0)
+    healpix_map = _allocate_healpix_map(nside,
+                                        dtype=masked_weights.dtype,
+                                        sharding=sharding)
+    healpix_map = healpix_map.at[idx_safe].add(val_safe)
 
     # Apply shell-volume normalization
     shell_vol_per_pix = pixel_area * (R_max**3 - R_min**3) / 3
@@ -331,7 +337,7 @@ def paint_particles_spherical_rbf_neighbor(
          static_argnames=("nside", "method", "ud_grade_order_in",
                           "ud_grade_order_out", "ud_grade_power",
                           "ud_grade_pess", "paint_nside",
-                          "smoothing_interpretation"))
+                          "smoothing_interpretation", "sharding"))
 def paint_particles_spherical(
     positions: Array,
     nside: int,
@@ -342,7 +348,7 @@ def paint_particles_spherical(
     mesh_shape: Tuple[int, int, int],
     weights: Optional[Array] = None,
     method: str = "ngp",
-    kernel_width_arcmin: float = 1.0,
+    kernel_width_arcmin: Optional[float] = None,
     smoothing_interpretation: str = "fwhm",
     # High-resolution painting option
     paint_nside: Optional[int] = None,
@@ -350,6 +356,8 @@ def paint_particles_spherical(
     ud_grade_order_in: str = "RING",
     ud_grade_order_out: str = "RING",
     ud_grade_pess: bool = False,
+    # Sharding infomration
+    sharding: Optional[jax.sharding.Sharding] = None,
 ) -> Array:
     """
     High-level spherical painter: select method and optionally paint at higher resolution.
@@ -393,6 +401,12 @@ def paint_particles_spherical(
         Output pixel ordering for ud_grade
     ud_grade_pess : bool
         Pessimistic flag for ud_grade
+    sharding : jax.sharding.Sharding, optional
+        Sharding information for distributed computation. If provided, the HEALPix map
+        will be allocated with the specified sharding but using only the first dimension.
+        This means that most effective domain decomposition will be slab-based along the first dimension
+        If sharding is provided, all the operations are guarenteed to use all the available devices
+        and the output map will be sharded according to the provided sharding.
 
     Returns
     -------
@@ -405,6 +419,11 @@ def paint_particles_spherical(
     internal_nside = int(paint_nside) if paint_nside is not None else int(
         nside)
 
+    if weights is None:
+        # Alternative, shard perserving ones_like
+        weights = positions[
+            ..., 0] * 0.0 + 1.0  # shape (...,) with same sharding as positions
+
     # Select appropriate painter
     if method_upper == "NGP":
         map_hi = paint_particles_spherical_ngp(
@@ -416,6 +435,7 @@ def paint_particles_spherical(
             box_size,
             mesh_shape,
             weights=weights,
+            sharding=sharding,
         )
     elif method_upper == "BILINEAR":
         map_hi = paint_particles_spherical_bilinear(
@@ -427,6 +447,7 @@ def paint_particles_spherical(
             box_size,
             mesh_shape,
             weights=weights,
+            sharding=sharding,
         )
     elif method_upper == "RBF_NEIGHBOR":
         map_hi = paint_particles_spherical_rbf_neighbor(
@@ -440,6 +461,7 @@ def paint_particles_spherical(
             weights=weights,
             kernel_width_arcmin=kernel_width_arcmin,
             smoothing_interpretation=smoothing_interpretation,
+            sharding=sharding,
         )
     else:
         raise ValueError(
@@ -462,18 +484,39 @@ def paint_particles_spherical(
 
 @partial(jax.jit, static_argnames=("nside", ))
 def spherical_visibility_mask(
-        nside: int,
-        observer_position: Array,  # normalized coords in [0,1]^3
+    nside: int,
+    observer_position: Array,
+    box_size: Union[float, Array, jnp.ndarray] = 1.0,
+    R_min: float = 0.0,
+    R_max: float = jnp.inf,
 ) -> Array:
     """
-    Geometric visibility mask using only nside and observer_position.
+    Geometric visibility mask for spherical shell painting.
 
-    Assumptions
-    -----------
-    - Simulation volume is the unit cube [0,1]^3 (axis-aligned).
-    - observer_position is given in normalized coordinates.
-    - A pixel is 'visible' if a ray from the observer through that pixel's
-      direction hits the cube for some t > 0.
+    A pixel is 'visible' (i.e. it would receive particles from a uniformly
+    filled box) iff the radial segment ``[R_min, R_max]`` along that pixel's
+    direction, starting from the observer, intersects the axis-aligned box
+    ``[0, box_size]^3``.
+
+    This mirrors the geometry of :func:`paint_particles_spherical`: the painter
+    keeps only particles whose distance from the observer lies in
+    ``[R_min, R_max]``, so a direction is visible exactly when the box overlaps
+    that shell. All of ``observer_position``, ``box_size``, ``R_min`` and
+    ``R_max`` are expressed in the same physical units used by the painter.
+
+    Parameters
+    ----------
+    nside : int
+        HEALPix nside parameter.
+    observer_position : ndarray, shape (3,)
+        Observer position in the same (physical) coordinates as the box.
+    box_size : float or array, optional
+        Size of the simulation box. Scalar or per-axis (3,). The box is assumed
+        axis-aligned with origin at 0, i.e. ``[0, box_size]^3``. Default 1.0.
+    R_min, R_max : float, optional
+        Minimum and maximum comoving distance of the shell. Defaults
+        ``R_min=0``, ``R_max=inf`` reduce the mask to the pure
+        "ray hits the box" test.
 
     Returns
     -------
@@ -481,14 +524,12 @@ def spherical_visibility_mask(
         1.0 where visible, 0.0 otherwise.
     """
     obs = jnp.asarray(observer_position, dtype=jnp.float32)  # (3,)
-    obs = jnp.clip(obs, 0.0, 1.0)
+    bmax = jnp.broadcast_to(jnp.asarray(box_size, jnp.float32), (3, ))  # (3,)
     bmin = jnp.zeros((3, ), dtype=jnp.float32)
-    bmax = jnp.ones((3, ), dtype=jnp.float32)
 
     npix = jhp.nside2npix(nside)
-    ipix = jnp.arange(npix, dtype=jnp.int64)
     # Pixel center directions (unit vectors), shape (npix, 3)
-    dirs = jhp.pix2vec(nside, ipix)
+    dirs = jhp.pix2vec(nside, jnp.arange(npix))
 
     # Robust slab intersection (vectorized).
     # For axes where dir == 0, treat as parallel: if obs is inside the slab,
@@ -502,9 +543,16 @@ def spherical_visibility_mask(
     t2 = jnp.where(dir_nz, (bmax - obs) / dirs,
                    jnp.where(inside_axis, jnp.inf, -jnp.inf))
 
-    tmin = jnp.max(jnp.minimum(t1, t2), axis=-1)  # (npix,)
-    tmax = jnp.min(jnp.maximum(t1, t2), axis=-1)  # (npix,)
+    tmin = jnp.max(jnp.minimum(t1, t2), axis=-1)  # entry distance (npix,)
+    tmax = jnp.min(jnp.maximum(t1, t2), axis=-1)  # exit distance  (npix,)
 
-    # Visible if the forward ray intersects: tmax >= max(tmin, 0)
-    visible = tmax > jnp.maximum(tmin, jnp.float32(0.0))
+    # The forward ray inside the box spans [max(tmin, 0), tmax]. The pixel is
+    # visible iff that segment shares a positive-length overlap with the shell
+    # [R_min, R_max]. Since R_min >= 0, `lo` is already clamped to t >= 0, and
+    # the strict `<` rejects measure-zero grazing hits (e.g. a corner observer
+    # looking away from the box). With the defaults (R_min=0, R_max=inf) this
+    # reduces exactly to the bare "forward ray hits the box" test.
+    lo = jnp.maximum(tmin, jnp.asarray(R_min, jnp.float32))
+    hi = jnp.minimum(tmax, jnp.asarray(R_max, jnp.float32))
+    visible = lo < hi
     return visible.astype(jnp.float32)
