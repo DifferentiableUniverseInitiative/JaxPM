@@ -15,13 +15,8 @@ from functools import partial
 import jax.numpy as jnp
 import jax_cosmo as jc
 import numpy as np
-from diffrax import (
-    ConstantStepSize,
-    ODETerm,
-    SaveAt,
-    SemiImplicitEuler,
-    diffeqsolve,
-)
+from diffrax import (ConstantStepSize, ODETerm, SaveAt, SemiImplicitEuler,
+                     diffeqsolve)
 from jax.experimental.multihost_utils import process_allgather
 from jax.sharding import AxisType, NamedSharding
 from jax.sharding import PartitionSpec as P
@@ -36,7 +31,8 @@ all_gather = partial(process_allgather, tiled=True)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description="Run a multi-host cosmological PM simulation with JAX (FastPM solver)."
+        description=
+        "Run a multi-host cosmological PM simulation with JAX (FastPM solver)."
     )
     parser.add_argument(
         "-p",
@@ -52,7 +48,8 @@ def parse_arguments():
         type=int,
         nargs=3,
         default=[512, 512, 512],
-        help="Shape of the simulation mesh as three values (e.g., 512 512 512).",
+        help=
+        "Shape of the simulation mesh as three values (e.g., 512 512 512).",
     )
     parser.add_argument(
         "-b",
@@ -60,7 +57,8 @@ def parse_arguments():
         type=float,
         nargs=3,
         default=[500.0, 500.0, 500.0],
-        help="Box size of the simulation as three values (e.g., 500.0 500.0 1000.0).",
+        help=
+        "Box size of the simulation as three values (e.g., 500.0 500.0 1000.0).",
     )
     parser.add_argument(
         "-st",
@@ -69,9 +67,11 @@ def parse_arguments():
         default=2,
         help="Number of snapshots to save during the simulation.",
     )
-    parser.add_argument(
-        "-H", "--halo_size", type=int, default=64, help="Halo size for the simulation."
-    )
+    parser.add_argument("-H",
+                        "--halo_size",
+                        type=int,
+                        default=64,
+                        help="Halo size for the simulation.")
     return parser.parse_args()
 
 
@@ -80,9 +80,9 @@ def create_sharding(pdims):
     # primitives rely on JAX's automatic (compiler-managed) sharding. An Explicit-axis
     # mesh (the default of jax.make_mesh without axis_types) would break them. See:
     # https://jaxdecomp.readthedocs.io/en/latest/07-xla_sharding_configuration.html#auto-vs-explicit-axis-types
-    mesh = jax.make_mesh(
-        pdims, axis_names=("x", "y"), axis_types=(AxisType.Auto, AxisType.Auto)
-    )
+    mesh = jax.make_mesh(pdims,
+                         axis_names=("x", "y"),
+                         axis_types=(AxisType.Auto, AxisType.Auto))
     return NamedSharding(mesh, P("x", "y"))
 
 
@@ -97,18 +97,23 @@ def run_simulation(
     sharding,
 ):
     k = jnp.logspace(-4, 1, 128)
-    pk = jc.power.linear_matter_power(jc.Planck15(Omega_c=omega_c, sigma8=sigma8), k)
+    pk = jc.power.linear_matter_power(
+        jc.Planck15(Omega_c=omega_c, sigma8=sigma8), k)
     pk_fn = lambda x: interpolate_power_spectrum(x, k, pk, sharding)
 
-    initial_conditions = linear_field(
-        mesh_shape, box_size, pk_fn, seed=jax.random.PRNGKey(0), sharding=sharding
-    )
+    initial_conditions = linear_field(mesh_shape,
+                                      box_size,
+                                      pk_fn,
+                                      seed=jax.random.PRNGKey(0),
+                                      sharding=sharding)
 
     cosmo = jc.Planck15(Omega_c=omega_c, sigma8=sigma8)
 
-    dx, p, _ = lpt(
-        cosmo, initial_conditions, a=0.1, halo_size=halo_size, sharding=sharding
-    )
+    dx, p, _ = lpt(cosmo,
+                   initial_conditions,
+                   a=0.1,
+                   halo_size=halo_size,
+                   sharding=sharding)
 
     # FastPM solver: symplectic kick/drift operators integrated by a fixed-step
     # symplectic Euler. The FastPM factors are per unit dt0, so a constant step that
@@ -145,8 +150,7 @@ def run_simulation(
             order="cic",
             halo_size=halo_size,
             sharding=sharding,
-        )
-        for pos in res.ys[0]
+        ) for pos in res.ys[0]
     ]
     lpt_field = paint(
         dx,
