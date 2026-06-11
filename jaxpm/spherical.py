@@ -708,77 +708,174 @@ def deconvolve_map(
     return jnp.real(jhp.alm2map(alm, nside=nside, lmax=lmax))
 
 
-@partial(jax.jit, static_argnames=("nside", ))
-def spherical_visibility_mask(
-    nside: int,
-    observer_position: Array,
-    box_size: Union[float, Array, jnp.ndarray] = 1.0,
-    R_min: float = 0.0,
-    R_max: float = jnp.inf,
-) -> Array:
+def _ray_box_entry_exit(
+    dirs: Array,
+    obs: Array,
+    bmin: Array,
+    bmax: Array,
+) -> Tuple[Array, Array]:
+    """Entry/exit distances of rays ``obs + t * dirs`` through an axis-aligned box.
+
+    Robust slab (Kay-Kajiya) intersection, fully vectorized. ``dirs`` has shape
+    ``(..., 3)``; ``obs``, ``bmin``, ``bmax`` are ``(3,)``. Returns
+    ``(tmin, tmax)`` of shape ``dirs.shape[:-1]``: the ray is inside the box for
+    ``t in [tmin, tmax]`` (the segment is empty when ``tmin > tmax``).
+
+    For axes where a direction component is ~0 the ray is parallel to that slab:
+    if the observer lies inside the slab the axis imposes no constraint
+    ``(-inf, +inf)``; otherwise the ray can never enter ``(+inf, -inf)``.
+
+    Used by :func:`spherical_visibility_mask` (graded, supersampled) for the
+    per-ray box geometry.
     """
-    Geometric visibility mask for spherical shell painting.
-
-    A pixel is 'visible' (i.e. it would receive particles from a uniformly
-    filled box) iff the radial segment ``[R_min, R_max]`` along that pixel's
-    direction, starting from the observer, intersects the axis-aligned box
-    ``[0, box_size]^3``.
-
-    This mirrors the geometry of :func:`paint_particles_spherical`: the painter
-    keeps only particles whose distance from the observer lies in
-    ``[R_min, R_max]``, so a direction is visible exactly when the box overlaps
-    that shell. All of ``observer_position``, ``box_size``, ``R_min`` and
-    ``R_max`` are expressed in the same physical units used by the painter.
-
-    Parameters
-    ----------
-    nside : int
-        HEALPix nside parameter.
-    observer_position : ndarray, shape (3,)
-        Observer position in the same (physical) coordinates as the box.
-    box_size : float or array, optional
-        Size of the simulation box. Scalar or per-axis (3,). The box is assumed
-        axis-aligned with origin at 0, i.e. ``[0, box_size]^3``. Default 1.0.
-    R_min, R_max : float, optional
-        Minimum and maximum comoving distance of the shell. Defaults
-        ``R_min=0``, ``R_max=inf`` reduce the mask to the pure
-        "ray hits the box" test.
-
-    Returns
-    -------
-    mask : float32 ndarray of shape (12 * nside^2,)
-        1.0 where visible, 0.0 otherwise.
-    """
-    obs = jnp.asarray(observer_position, dtype=jnp.float32)  # (3,)
-    bmax = jnp.broadcast_to(jnp.asarray(box_size, jnp.float32), (3, ))  # (3,)
-    bmin = jnp.zeros((3, ), dtype=jnp.float32)
-
-    npix = jhp.nside2npix(nside)
-    # Pixel center directions (unit vectors), shape (npix, 3)
-    dirs = jhp.pix2vec(nside, jnp.arange(npix))
-
-    # Robust slab intersection (vectorized).
-    # For axes where dir == 0, treat as parallel: if obs is inside the slab,
-    # set t to (-inf, +inf); else to (+inf, -inf) so it won't intersect.
     eps = jnp.float32(1e-12)
     inside_axis = (obs >= bmin) & (obs <= bmax)  # (3,)
-    dir_nz = jnp.abs(dirs) > eps  # (npix, 3)
+    dir_nz = jnp.abs(dirs) > eps  # (..., 3)
 
     t1 = jnp.where(dir_nz, (bmin - obs) / dirs,
                    jnp.where(inside_axis, -jnp.inf, jnp.inf))
     t2 = jnp.where(dir_nz, (bmax - obs) / dirs,
                    jnp.where(inside_axis, jnp.inf, -jnp.inf))
 
-    tmin = jnp.max(jnp.minimum(t1, t2), axis=-1)  # entry distance (npix,)
-    tmax = jnp.min(jnp.maximum(t1, t2), axis=-1)  # exit distance  (npix,)
+    tmin = jnp.max(jnp.minimum(t1, t2), axis=-1)  # entry distance (...,)
+    tmax = jnp.min(jnp.maximum(t1, t2), axis=-1)  # exit distance  (...,)
+    return tmin, tmax
 
-    # The forward ray inside the box spans [max(tmin, 0), tmax]. The pixel is
-    # visible iff that segment shares a positive-length overlap with the shell
-    # [R_min, R_max]. Since R_min >= 0, `lo` is already clamped to t >= 0, and
-    # the strict `<` rejects measure-zero grazing hits (e.g. a corner observer
-    # looking away from the box). With the defaults (R_min=0, R_max=inf) this
-    # reduces exactly to the bare "forward ray hits the box" test.
-    lo = jnp.maximum(tmin, jnp.asarray(R_min, jnp.float32))
-    hi = jnp.minimum(tmax, jnp.asarray(R_max, jnp.float32))
-    visible = lo < hi
-    return visible.astype(jnp.float32)
+
+@partial(jax.jit, static_argnames=("nside", "supersample"))
+def spherical_visibility_mask(
+    nside: int,
+    observer_position: Array,
+    box_size: Union[float, Array, jnp.ndarray] = 1.0,
+    R_min: float = 0.0,
+    R_max: float = 0.5,
+    *,
+    supersample: int = 4,
+    threshold: Optional[float] = None,
+) -> Array:
+    r"""Graded geometric visibility mask for spherical shell painting.
+
+    The analytical analogue of :func:`paint_particles_spherical`. For each HEALPix
+    pixel it returns a value in ``[0, 1]`` equal -- in the continuum /
+    large-particle-number limit -- to the painted density normalised by the mean
+    box density ``n = N / V_box``:
+
+    .. math::
+
+        \mathrm{painted}_p / n \;=\; \big\langle f(\hat d) \big\rangle_{\text{pixel } p},
+        \qquad
+        f(\hat d) = \frac{\min(t_\mathrm{max}, R_\mathrm{max})^3
+                          - \max(t_\mathrm{min}, R_\mathrm{min})^3}
+                         {R_\mathrm{max}^3 - R_\mathrm{min}^3}\Bigg|_+ ,
+
+    averaged over the pixel's solid angle. Here ``t_min, t_max`` are the ray<->box
+    entry/exit distances (see :func:`_ray_box_entry_exit`) and ``f`` is the
+    fraction of the line-of-sight shell ``[R_min, R_max]`` that lies inside the
+    box. The cube of ``t`` is the ``r^2 dr`` volume weighting of the shell, so
+    ``f`` counts the *number* of particles, exactly as the painter does.
+
+    Interpretation of the returned map:
+
+    - ``coverage == 1``     -- **fully observed**: the whole pixel cone x shell is
+      inside the box, so the painter reads the full mean density ``n`` there.
+    - ``0 < coverage < 1``  -- **partially / poorly observed**: the pixel straddles
+      the edge of the projected region, or a box face cuts the shell radially.
+    - ``coverage == 0``     -- **not observed**.
+
+    A clean three-level label follows from thresholding::
+
+        fully   = coverage >= 1.0 - tol
+        none    = coverage <= tol
+        partial = ~fully & ~none
+
+    Note this is the *geometric expectation*. In a finite-particle realisation a
+    geometrically full pixel can still come out empty from shot noise (Poisson)
+    when the shell holds few particles per pixel -- a sampling-density question on
+    top of the geometry, not a coverage effect. Likewise the ``bilinear`` /
+    ``rbf_neighbor`` painters spread each particle onto neighbouring pixels, so
+    their painted footprint is ~1 pixel wider than this geometric coverage; ``ngp``
+    matches it most closely.
+
+    Parameters
+    ----------
+    nside : int
+        HEALPix nside of the returned map.
+    observer_position : ndarray, shape (3,)
+        Observer position in the same (physical) coordinates as the box.
+    box_size : float or array, optional
+        Axis-aligned box ``[0, box_size]^3`` (scalar or per-axis (3,)). Default 1.0.
+    R_min, R_max : float, optional
+        Shell radii in the same units as the box. The defaults
+        (``box_size=1``, ``R_min=0``, ``R_max=0.5``) form a matched **unit-box**
+        configuration -- a unit cube observed out to a half-box radius; for a
+        physical box pass ``R_max`` (and ``R_min``) explicitly. ``R_max`` must be
+        finite for the graded fraction; if ``R_max`` is ``inf`` there is no radial
+        range to normalise against and each ray reduces to the binary "ray hits
+        the box" indicator -- so ``supersample=1`` gives a pure 0/1 mask and
+        ``supersample>1`` its angularly-averaged (soft-edged) version.
+    supersample : int, optional
+        Sub-pixel oversampling factor. The fraction is evaluated at
+        ``nside * supersample`` and averaged back down with ``jhp.ud_grade``.
+        ``supersample=1`` uses one ray per pixel (exact *radial* rim, but a hard
+        one-pixel *angular* edge); ``supersample >= 4`` (default) also resolves the
+        angular rim. Cost scales as ``supersample ** 2``.
+    threshold : float, optional
+        If given, pixels with mask value ``< threshold`` are zeroed and the rest
+        keep their (fractional) value: ``where(mask >= threshold, mask, 0)``.
+        E.g. ``threshold=1.0`` keeps only fully-observed pixels; a small value
+        keeps everything geometrically visible. Default ``None`` (no thresholding).
+
+    Returns
+    -------
+    mask : float32 ndarray of shape (12 * nside^2,)
+        Visibility / coverage in ``[0, 1]`` (after the optional thresholding).
+
+    See Also
+    --------
+    paint_particles_spherical : the painter this predicts (``painted / n``) in
+        expectation.
+    """
+    obs = jnp.asarray(observer_position, dtype=jnp.float32)  # (3,)
+    bmax = jnp.broadcast_to(jnp.asarray(box_size, jnp.float32), (3, ))  # (3,)
+    bmin = jnp.zeros((3, ), dtype=jnp.float32)
+
+    # Evaluate the per-ray fraction on a finer grid, then average sub-rays down.
+    fine_nside = int(nside) * int(supersample)
+    npix = jhp.nside2npix(fine_nside)
+    dirs = jhp.pix2vec(fine_nside, jnp.arange(npix))  # (npix, 3)
+
+    tmin, tmax = _ray_box_entry_exit(dirs, obs, bmin, bmax)
+
+    R_min_f = jnp.asarray(R_min, jnp.float32)
+    R_max_f = jnp.asarray(R_max, jnp.float32)
+    lo = jnp.maximum(tmin, R_min_f)  # entry into box ∩ shell
+    hi = jnp.minimum(tmax, R_max_f)  # exit  from box ∩ shell
+    overlap = hi > lo
+
+    # r^2-weighted (number-counting) fraction of the shell inside the box.
+    # `denom` is +inf when R_max is inf; guard it and select the binary fallback
+    # with `jnp.where` so this stays valid under jit (R_min/R_max are traced).
+    denom = R_max_f**3 - R_min_f**3
+    safe_denom = jnp.where(denom > 0.0, denom, 1.0)
+    graded = jnp.where(overlap, jnp.clip((hi**3 - lo**3) / safe_denom, 0.0,
+                                         1.0), 0.0)
+    binary = overlap.astype(jnp.float32)
+    frac_fine = jnp.where(jnp.isinf(R_max_f), binary,
+                          graded).astype(jnp.float32)
+
+    if int(supersample) == 1:
+        final_map = frac_fine
+    else:
+        # power=0 -> simple mean of child pixels; same ud_grade pattern the
+        # painter uses for paint_nside (paint_particles_spherical).
+        final_map = jhp.ud_grade(frac_fine,
+                                 int(nside),
+                                 power=0,
+                                 order_in="RING",
+                                 order_out="RING").astype(jnp.float32)
+
+    # Optional threshold: keep the (fractional) value where >= threshold, else 0.
+    if threshold is not None:
+        final_map = jnp.where(final_map >= threshold, final_map, 0.0)
+
+    return final_map
