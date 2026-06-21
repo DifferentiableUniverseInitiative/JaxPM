@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 import jaxdecomp
 from jax import lax, shard_map
-from jax.sharding import AbstractMesh, Mesh
+from jax.sharding import AbstractMesh, Mesh, NamedSharding
 from jax.sharding import PartitionSpec as P
 
 
@@ -50,11 +50,13 @@ def get_halo_size(halo_size, sharding):
         return (zero_tuple, zero_tuple, zero_tuple), zero_ext
     else:
         pdims = gpu_mesh.devices.shape
-    halo_x = (0, 0) if pdims[0] == 1 else (halo_size, halo_size)
-    halo_y = (0, 0) if pdims[1] == 1 else (halo_size, halo_size)
+    if isinstance(halo_size, int):
+        halo_size = (halo_size, halo_size)
+    halo_x = (0, 0) if pdims[0] == 1 else (halo_size[0], ) * 2
+    halo_y = (0, 0) if pdims[1] == 1 else (halo_size[1], ) * 2
 
-    halo_x_ext = 0 if pdims[0] == 1 else halo_size // 2
-    halo_y_ext = 0 if pdims[1] == 1 else halo_size // 2
+    halo_x_ext = 0 if pdims[0] == 1 else halo_size[0] // 2
+    halo_y_ext = 0 if pdims[1] == 1 else halo_size[1] // 2
     return ((halo_x, halo_y, (0, 0)), (halo_x_ext, halo_y_ext))
 
 
@@ -71,10 +73,10 @@ def slice_unpad_impl(x, pad_width):
     halo_y, _ = pad_width[1]
     # Apply corrections along x
     x = x.at[halo_x:halo_x + halo_x // 2].add(x[:halo_x // 2])
-    x = x.at[-(halo_x + halo_x // 2):-halo_x].add(x[-halo_x // 2:])
+    x = x.at[-(halo_x + halo_x // 2):-halo_x].add(x[-(halo_x // 2):])
     # Apply corrections along y
     x = x.at[:, halo_y:halo_y + halo_y // 2].add(x[:, :halo_y // 2])
-    x = x.at[:, -(halo_y + halo_y // 2):-halo_y].add(x[:, -halo_y // 2:])
+    x = x.at[:, -(halo_y + halo_y // 2):-halo_y].add(x[:, -(halo_y // 2):])
 
     unpad_slice = [slice(None)] * 3
     if halo_x > 0:
@@ -114,17 +116,36 @@ def slice_unpad(x, pad_width, sharding):
 
 
 def get_local_shape(mesh_shape, sharding=None):
-    """ Helper function to get the local size of a mesh given the global size.
-  """
+    """Helper function to get the local size of a mesh given the global size."""
     gpu_mesh = sharding.mesh if sharding is not None else None
     if gpu_mesh is None or gpu_mesh.empty:
-        return mesh_shape
-    else:
-        pdims = gpu_mesh.devices.shape
-        return [
-            mesh_shape[0] // pdims[0], mesh_shape[1] // pdims[1],
-            *mesh_shape[2:]
-        ]
+        return list(mesh_shape)
+    axis_name_to_size = {
+        name: gpu_mesh.devices.shape[i]
+        for i, name in enumerate(gpu_mesh.axis_names)
+    }
+    local_shape = list(mesh_shape)
+    for dim_idx, axis_name in enumerate(sharding.spec):
+        if axis_name is not None and dim_idx < len(local_shape):
+            local_shape[dim_idx] //= axis_name_to_size[axis_name]
+    return local_shape
+
+
+def get_sharding_for_shape(shape, sharding=None):
+    """Trim sharding spec to match the dimensionality of the given shape.
+
+    E.g. a 3D NamedSharding P('x','y') becomes P('x') for a 1D HEALPix array.
+    """
+    if sharding is None:
+        return None
+    gpu_mesh = sharding.mesh
+    if gpu_mesh is None or gpu_mesh.empty:
+        return sharding
+    ndim = len(shape)
+    spec = sharding.spec
+    if ndim < len(spec):
+        return NamedSharding(gpu_mesh, P(*spec[:ndim]))
+    return sharding
 
 
 def _axis_names(spec):
@@ -176,6 +197,7 @@ def normal_field(seed, shape, sharding=None, dtype=float):
     gpu_mesh = sharding.mesh if sharding is not None else None
     if gpu_mesh is not None and not (gpu_mesh.empty):
         local_mesh_shape = get_local_shape(shape, sharding)
+        sharding = get_sharding_for_shape(shape, sharding)
 
         size = jax.device_count()
         # rank = jax.process_index()
