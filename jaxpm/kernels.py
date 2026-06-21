@@ -1,10 +1,35 @@
+import warnings
+
 import jax.numpy as jnp
 import numpy as np
 from jax.lax import FftType
 from jax.sharding import PartitionSpec as P
-from jaxdecomp import fftfreq3d, get_output_specs
+from jaxdecomp import fftfreq3d, get_fft_output_sharding
 
 from jaxpm.distributed import autoshmap
+
+# Mapping from mass-assignment scheme name to its order (number of cells the
+# kernel spans per dimension). Shared with jaxpm.painting.
+_ORDER = {'ngp': 1, 'cic': 2, 'tsc': 3, 'pcs': 4}
+
+
+def resolve_order(order):
+    """Normalise a painting order to its integer code (1-4).
+
+    Accepts either a name ('NGP', 'CIC', 'TSC', 'PCS', case-insensitive) or an
+    integer 1-4 (NGP=1, CIC=2, TSC=3, PCS=4).
+    """
+    if isinstance(order, str):
+        try:
+            return _ORDER[order.lower()]
+        except KeyError:
+            raise ValueError(
+                f"Unknown painting order {order!r}; expected one of "
+                f"{sorted(_ORDER)} or an integer 1-4") from None
+    order = int(order)
+    if order not in (1, 2, 3, 4):
+        raise ValueError(f"Painting order must be in 1-4, got {order}")
+    return order
 
 
 def fftk(k_array):
@@ -25,12 +50,12 @@ def fftk(k_array):
 
 def interpolate_power_spectrum(input, k, pk, sharding=None):
 
-    pk_fn = lambda x: jnp.interp(x.reshape(-1), k, pk).reshape(x.shape)
+    pk_fn = lambda x: jnp.interp(x, k, pk)
 
     gpu_mesh = sharding.mesh if sharding is not None else None
     specs = sharding.spec if sharding is not None else P()
-    out_specs = P(*get_output_specs(
-        FftType.FFT, specs, mesh=gpu_mesh)) if gpu_mesh is not None else P()
+    out_specs = get_fft_output_sharding(
+        sharding).spec if sharding is not None else P()
 
     return autoshmap(pk_fn,
                      gpu_mesh=gpu_mesh,
@@ -56,7 +81,7 @@ def gradient_kernel(kvec, direction, order=1):
     if order == 0:
         wts = 1j * kvec[direction]
         wts = jnp.squeeze(wts)
-        wts[len(wts) // 2] = 0
+        wts = wts.at[len(wts) // 2].set(0)
         wts = wts.reshape(kvec[direction].shape)
         return wts
     else:
@@ -115,25 +140,94 @@ def longrange_kernel(kvec, r_split):
         return 1.
 
 
-def cic_compensation(kvec):
-    """
-    Computes cic compensation kernel.
-    Adapted from https://github.com/bccp/nbodykit/blob/a387cf429d8cb4a07bb19e3b4325ffdf279a131e/nbodykit/source/mesh/catalog.py#L499
-    Itself based on equation 18 (with p=2) of
-          [Jing et al 2005](https://arxiv.org/abs/astro-ph/0409240)
+def compensation_kernel(kvec, order):
+    """Window-function (de)compensation kernel for a mass-assignment scheme.
 
-    Parameters:
-    -----------
-    kvec: list
-        List of wave-vectors
-    Returns:
-    --------
-    wts: array
-        Complex kernel values
+    Painting a particle onto the grid convolves the field with the assignment
+    window ``W(k) = prod_i sinc(k_i / 2)^order`` (``jnp.sinc(k/(2*pi)) =
+    sin(k/2)/(k/2)``), which suppresses small scales. This returns the inverse
+    window ``W(k)^(-order)``, i.e. multiplying a painted *field* by this kernel
+    in Fourier space deconvolves it (removes one factor of the window).
+
+    For a *power spectrum* the window enters squared, so square this kernel
+    (see :func:`jaxpm.utils.power_spectrum`).
+
+    Based on equation 18 of [Jing et al 2005](https://arxiv.org/abs/astro-ph/0409240),
+    generalised from CIC (p=2) to arbitrary order.
+
+    Parameters
+    ----------
+    kvec : list
+        List of wave-vectors.
+    order : int or str
+        Assignment order: NGP=1, CIC=2, TSC=3, PCS=4 (name or integer).
+
+    Returns
+    -------
+    wts : array
+        Real kernel values ``(prod_i sinc(k_i/(2*pi)))**(-order)``.
     """
+    order = resolve_order(order)
     kwts = [jnp.sinc(kvec[i] / (2 * np.pi)) for i in range(3)]
-    wts = (kwts[0] * kwts[1] * kwts[2])**(-2)
-    return wts
+    return (kwts[0] * kwts[1] * kwts[2])**(-order)
+
+
+def gridding_shotnoise_kernel(kvec, order):
+    """Aliased shot-noise (dealiasing) kernel ``C_order(k)`` for a scheme.
+
+    The discreteness (Poisson) shot noise of particles painted with a given
+    assignment scheme is not flat but aliased: its expectation is
+    ``(1 / nbar) * C_order(k)``, where ``C_order(k) = prod_i C_order(k_i)`` and
+    each per-dimension factor is the closed-form sum of ``|W|^2`` over aliases
+    (Jing et al 2005). To *dealias* a measured power spectrum, subtract
+    ``(1 / nbar) * gridding_shotnoise_kernel(kvec, order)`` before deconvolving.
+
+    This is a power-spectrum-level correction and is intentionally **not**
+    applied inside :func:`jaxpm.painting.paint` (it cannot be expressed as a
+    filter on a field); it is exposed here as a standalone kernel.
+
+    With ``s2 = sin(k_i / 2)**2`` the per-dimension factors are:
+      - NGP : 1
+      - CIC : 1 - (2/3) s2
+      - TSC : 1 - s2 + (2/15) s2**2
+      - PCS : 1 - (4/3) s2 + (2/5) s2**2 - (4/315) s2**3
+
+    Parameters
+    ----------
+    kvec : list
+        List of wave-vectors.
+    order : int or str
+        Assignment order: NGP=1, CIC=2, TSC=3, PCS=4 (name or integer).
+
+    Returns
+    -------
+    wts : array
+        Dimensionless ``C_order(k)``; multiply by ``1 / nbar`` for the noise.
+    """
+    order = resolve_order(order)
+
+    def per_dim(ki):
+        s2 = jnp.sin(ki / 2.0)**2
+        if order == 1:
+            return jnp.ones_like(s2)
+        elif order == 2:
+            return 1. - 2. / 3. * s2
+        elif order == 3:
+            return 1. - s2 + 2. / 15. * s2**2
+        else:  # order == 4
+            return 1. - 4. / 3. * s2 + 2. / 5. * s2**2 - 4. / 315. * s2**3
+
+    return per_dim(kvec[0]) * per_dim(kvec[1]) * per_dim(kvec[2])
+
+
+def cic_compensation(kvec):
+    """Deprecated: use :func:`compensation_kernel` with ``order='cic'`` instead."""
+    warnings.warn(
+        "cic_compensation is deprecated; use "
+        "compensation_kernel(kvec, order) instead.",
+        DeprecationWarning,
+        stacklevel=2)
+    return compensation_kernel(kvec, 2)
 
 
 def PGD_kernel(kvec, kl, ks):
@@ -157,9 +251,9 @@ def PGD_kernel(kvec, kl, ks):
     kk = sum(ki**2 for ki in kvec)
     kl2 = kl**2
     ks4 = ks**4
-    mask = (kk == 0).nonzero()
-    kk[mask] = 1
-    v = jnp.exp(-kl2 / kk) * jnp.exp(-kk**2 / ks4)
+    kk_nozero = jnp.where(kk == 0, 1,
+                          kk)  # avoid 0-division at k=0 (masked below)
+    v = jnp.exp(-kl2 / kk_nozero) * jnp.exp(-kk_nozero**2 / ks4)
     imask = (~(kk == 0)).astype(int)
     v *= imask
     return v
