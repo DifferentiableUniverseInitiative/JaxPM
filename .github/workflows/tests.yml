@@ -58,9 +58,11 @@ jobs:
         # Depends on the new jax_cosmo cache (see ASKabalan:better-cache).
         # Temporary until the cache + import-error fixes merge upstream.
         pip install git+https://github.com/ASKabalan/jax_cosmo@better-cache
-        # PyPI jax-healpy 0.6 collapses multi-dim batch shapes in get_interp_weights /
-        # get_all_neighbours, breaking spherical.py broadcasting. This has been merged with CMBSciPol/jax-healpy#2, we will install from main until a new release.
-        pip install -U "jax-healpy[recommended] @ git+https://github.com/CMBSciPol/jax-healpy"
+        # jax-healpy comes from PyPI via the core `jax-healpy>=0.7.0` dependency
+        # (installed by `pip install -e .[test]` above). 0.7 carries the
+        # get_interp_weights / get_all_neighbours broadcasting fix (CMBSciPol/jax-healpy#2)
+        # that the old git install worked around, and pulls no s2fft (it lives in the
+        # `recommended` extra) — so the spherical deconvolution tests skip cleanly.
         # Install test requirements with no-build-isolation for faster builds
         pip install -r requirements-test.txt --no-build-isolation
         echo "numpy version installed:"
