@@ -15,9 +15,21 @@ def pm_forces(positions,
               r_split=0,
               paint_absolute_pos=True,
               halo_size=0,
-              sharding=None):
+              sharding=None,
+              solver="fft",
+              mg_params=None,
+              u0=None,
+              return_potential=False,
+              fd=False):
     """
-    Computes gravitational forces on particles using a PM scheme
+    Computes gravitational forces on particles using a PM scheme.
+
+    solver : "fft" (default, jaxdecomp FFT Poisson solve) or "mg" (real-space halo multigrid).
+    mg_params : dict of multigrid knobs (cycles, v1, v2, omega, levels, agg_n) for solver="mg".
+    u0 : optional warm-start potential (previous step's phi, e.g. growth-scaled) for solver="mg".
+         The FFT solver ignores it (direct solver). MG converges in far fewer cycles from a good u0.
+    return_potential : if True, also return the real-space potential phi (to recycle as next u0).
+                       For solver="fft" phi is returned as None.
     """
     if mesh_shape is None:
         assert (delta is not None),\
@@ -38,6 +50,22 @@ def pm_forces(positions,
         read_fn = lambda grid_mesh, disp: cic_read_dx(
             grid_mesh, disp, halo_size=halo_size, sharding=sharding)
 
+    if solver == "mg":
+        # Real-space multigrid Poisson + finite-difference gradient (warm-startable; no FFT).
+        from jaxpm.mg_forces import mg_force_field
+        if delta is None:
+            field = paint_fn(positions)
+        elif jnp.isrealobj(delta):
+            field = delta
+        else:
+            raise ValueError("solver='mg' needs a real-space density (got delta_k); "
+                             "pass delta=<real field> or positions.")
+        mesh = sharding.mesh if sharding is not None else None
+        force_mesh, phi = mg_force_field(field, mesh=mesh, u0=u0, **(mg_params or {}))
+        forces = jnp.stack([
+            read_fn(force_mesh[..., i], positions) for i in range(3)], axis=-1)
+        return (forces, phi) if return_potential else forces
+
     if delta is None:
         field = paint_fn(positions)
         delta_k = fft3d(field)
@@ -47,15 +75,16 @@ def pm_forces(positions,
         delta_k = delta
 
     kvec = fftk(delta_k)
-    # Computes gravitational potential
-    pot_k = delta_k * invlaplace_kernel(kvec) * longrange_kernel(
+    # Computes gravitational potential. fd=True uses the discrete-Laplacian inverse, matching
+    # the real-space multigrid operator (use it to compare FFT vs MG at the same discretization).
+    pot_k = delta_k * invlaplace_kernel(kvec, fd=fd) * longrange_kernel(
         kvec, r_split=r_split)
     # Computes gravitational forces
     forces = jnp.stack([
         read_fn(ifft3d(-gradient_kernel(kvec, i) * pot_k),positions
         ) for i in range(3)], axis=-1) # yapf: disable
 
-    return forces
+    return (forces, None) if return_potential else forces
 
 
 def lpt(cosmo,
@@ -147,7 +176,13 @@ def linear_field(mesh_shape, box_size, pk, seed, sharding=None):
 def make_ode_fn(mesh_shape,
                 paint_absolute_pos=True,
                 halo_size=0,
-                sharding=None):
+                sharding=None,
+                solver="fft",
+                mg_params=None,
+                fd=False):
+    # solver="mg" uses the real-space multigrid Poisson solve (cold start). Warm-starting needs
+    # phi threaded through the integrator state, which an ODE RHS can't carry cleanly -- use the
+    # explicit leapfrog in bench/run_pm_compare.py for the warm-started path.
 
     def nbody_ode(state, a, cosmo):
         """
@@ -159,7 +194,10 @@ def make_ode_fn(mesh_shape,
                            mesh_shape=mesh_shape,
                            paint_absolute_pos=paint_absolute_pos,
                            halo_size=halo_size,
-                           sharding=sharding) * 1.5 * cosmo.Omega_m
+                           sharding=sharding,
+                           solver=solver,
+                           mg_params=mg_params,
+                           fd=fd) * 1.5 * cosmo.Omega_m
 
         # Computes the update of position (drift)
         dpos = 1. / (a**3 * jnp.sqrt(jc.background.Esqr(cosmo, a))) * vel
@@ -175,7 +213,13 @@ def make_ode_fn(mesh_shape,
 def make_diffrax_ode(mesh_shape,
                      paint_absolute_pos=True,
                      halo_size=0,
-                     sharding=None):
+                     sharding=None,
+                     solver="fft",
+                     mg_params=None,
+                     fd=False):
+    # solver="mg" uses the real-space multigrid Poisson solve (cold start). Warm-starting is not
+    # exposed here: an ODE vector field can't cleanly carry the recycled potential through a
+    # multi-stage/adaptive integrator -- use bench/run_pm_compare.py's explicit leapfrog for that.
 
     def nbody_ode(a, state, args):
         """
@@ -188,7 +232,10 @@ def make_diffrax_ode(mesh_shape,
                            mesh_shape=mesh_shape,
                            paint_absolute_pos=paint_absolute_pos,
                            halo_size=halo_size,
-                           sharding=sharding) * 1.5 * cosmo.Omega_m
+                           sharding=sharding,
+                           solver=solver,
+                           mg_params=mg_params,
+                           fd=fd) * 1.5 * cosmo.Omega_m
 
         # Computes the update of position (drift)
         dpos = 1. / (a**3 * jnp.sqrt(jc.background.Esqr(cosmo, a))) * vel
