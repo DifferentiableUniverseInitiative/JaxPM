@@ -19,7 +19,6 @@ def test_nbody_grad(simulation_config, initial_conditions, lpt_scale_factor,
                     absolute_painting, adjoint):
 
     mesh_shape, _ = simulation_config
-    cosmo._workspace = {}
 
     if adjoint == 'OTD':
         pytest.skip("OTD adjoint not implemented yet (needs PFFT3D JVP)")
