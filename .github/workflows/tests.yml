@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
     - name: Checkout Source
@@ -55,8 +55,9 @@ jobs:
         pip install -e .[test]
         # Install build dependencies
         pip install setuptools cython mpi4py
-        # Temporary until Eiffl merges https://github.com/DifferentiableUniverseInitiative/jax_cosmo/pull/146 (please do it :) )
-        pip install git+https://github.com/ASKabalan/jax_cosmo@fix-import-error
+        # Depends on the new jax_cosmo cache (see ASKabalan:better-cache).
+        # Temporary until the cache + import-error fixes merge upstream.
+        pip install git+https://github.com/ASKabalan/jax_cosmo@better-cache
         # Install test requirements with no-build-isolation for faster builds
         pip install -r requirements-test.txt --no-build-isolation
         echo "numpy version installed:"

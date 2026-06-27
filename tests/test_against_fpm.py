@@ -21,7 +21,7 @@ def test_lpt_absolute(simulation_config, initial_conditions, lpt_scale_factor,
                       fpm_lpt1_field, fpm_lpt2_field, cosmo, order):
 
     mesh_shape, box_shape = simulation_config
-    cosmo._workspace = {}
+
     particles = uniform_particles(mesh_shape)
 
     # Initial displacement
@@ -50,7 +50,7 @@ def test_lpt_relative(simulation_config, initial_conditions, lpt_scale_factor,
                       fpm_lpt1_field, fpm_lpt2_field, cosmo, order):
 
     mesh_shape, box_shape = simulation_config
-    cosmo._workspace = {}
+
     # Initial displacement
     dx, _, _ = lpt(cosmo, initial_conditions, a=lpt_scale_factor, order=order)
 
@@ -75,7 +75,7 @@ def test_nbody_absolute(simulation_config, initial_conditions,
                         cosmo, order):
 
     mesh_shape, box_shape = simulation_config
-    cosmo._workspace = {}
+
     particles = uniform_particles(mesh_shape)
 
     # Initial displacement
@@ -129,7 +129,6 @@ def test_nbody_relative(simulation_config, initial_conditions,
                         cosmo, order):
 
     mesh_shape, box_shape = simulation_config
-    cosmo._workspace = {}
 
     # Initial displacement
     dx, p, _ = lpt(cosmo, initial_conditions, a=lpt_scale_factor, order=order)
