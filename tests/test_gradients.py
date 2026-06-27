@@ -6,8 +6,9 @@ from helpers import MSE
 from jax import numpy as jnp
 
 from jaxpm.distributed import uniform_particles
+from jaxpm.ode import make_diffrax_ode
 from jaxpm.painting import cic_paint, cic_paint_dx
-from jaxpm.pm import lpt, make_diffrax_ode
+from jaxpm.pm import lpt
 
 
 @pytest.mark.single_device
