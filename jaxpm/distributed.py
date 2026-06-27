@@ -50,11 +50,11 @@ def get_halo_size(halo_size, sharding):
         return (zero_tuple, zero_tuple, zero_tuple), zero_ext
     else:
         pdims = gpu_mesh.devices.shape
-    halo_x = (0, 0) if pdims[0] == 1 else (halo_size, halo_size)
-    halo_y = (0, 0) if pdims[1] == 1 else (halo_size, halo_size)
+    halo_x = (0, 0) if pdims[0] == 1 else (halo_size[0], ) * 2
+    halo_y = (0, 0) if pdims[1] == 1 else (halo_size[1], ) * 2
 
-    halo_x_ext = 0 if pdims[0] == 1 else halo_size // 2
-    halo_y_ext = 0 if pdims[1] == 1 else halo_size // 2
+    halo_x_ext = 0 if pdims[0] == 1 else halo_size[0] // 2
+    halo_y_ext = 0 if pdims[1] == 1 else halo_size[1] // 2
     return ((halo_x, halo_y, (0, 0)), (halo_x_ext, halo_y_ext))
 
 

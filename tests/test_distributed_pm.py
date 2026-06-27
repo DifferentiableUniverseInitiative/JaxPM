@@ -96,7 +96,7 @@ def test_distrubted_pm(simulation_config, initial_conditions, cosmo, order,
     mesh = jax.make_mesh(pdims, ('x', 'y'),
                          axis_types=(AxisType.Auto, AxisType.Auto))
     sharding = NamedSharding(mesh, P('x', 'y'))
-    halo_size = mesh_shape[0] // 2
+    halo_size = (mesh_shape[0] // 2, ) * 2
 
     initial_conditions = lax.with_sharding_constraint(initial_conditions,
                                                       sharding)
@@ -192,7 +192,7 @@ def test_distrubted_gradients(simulation_config, initial_conditions, cosmo,
     mesh = jax.make_mesh(pdims, ('x', 'y'),
                          axis_types=(AxisType.Auto, AxisType.Auto))
     sharding = NamedSharding(mesh, P('x', 'y'))
-    halo_size = mesh_shape[0] // 2
+    halo_size = (mesh_shape[0] // 2, ) * 2
 
     initial_conditions = lax.with_sharding_constraint(initial_conditions,
                                                       sharding)
@@ -270,7 +270,7 @@ def test_fwd_rev_gradients(cosmo, pdims):
     mesh = jax.make_mesh(pdims, ('x', 'y'),
                          axis_types=(AxisType.Auto, AxisType.Auto))
     sharding = NamedSharding(mesh, P('x', 'y'))
-    halo_size = mesh_shape[0] // 2
+    halo_size = (mesh_shape[0] // 2, ) * 2
 
     initial_conditions = jax.random.normal(jax.random.PRNGKey(42), mesh_shape)
     initial_conditions = lax.with_sharding_constraint(initial_conditions,
@@ -340,7 +340,7 @@ def test_vmap(cosmo, pdims):
     mesh = jax.make_mesh(pdims, ('x', 'y'),
                          axis_types=(AxisType.Auto, AxisType.Auto))
     sharding = NamedSharding(mesh, P('x', 'y'))
-    halo_size = mesh_shape[0] // 2
+    halo_size = (mesh_shape[0] // 2, ) * 2
 
     single_dev_initial_conditions = jax.random.normal(jax.random.PRNGKey(42),
                                                       mesh_shape)

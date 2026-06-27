@@ -2,7 +2,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.lax import FftType
 from jax.sharding import PartitionSpec as P
-from jaxdecomp import fftfreq3d, get_output_specs
+from jaxdecomp import fftfreq3d, get_fft_output_sharding
 
 from jaxpm.distributed import autoshmap
 
@@ -25,12 +25,12 @@ def fftk(k_array):
 
 def interpolate_power_spectrum(input, k, pk, sharding=None):
 
-    pk_fn = lambda x: jnp.interp(x.reshape(-1), k, pk).reshape(x.shape)
+    pk_fn = lambda x: jnp.interp(x, k, pk)
 
     gpu_mesh = sharding.mesh if sharding is not None else None
     specs = sharding.spec if sharding is not None else P()
-    out_specs = P(*get_output_specs(
-        FftType.FFT, specs, mesh=gpu_mesh)) if gpu_mesh is not None else P()
+    out_specs = get_fft_output_sharding(
+        sharding).spec if sharding is not None else P()
 
     return autoshmap(pk_fn,
                      gpu_mesh=gpu_mesh,
@@ -56,7 +56,7 @@ def gradient_kernel(kvec, direction, order=1):
     if order == 0:
         wts = 1j * kvec[direction]
         wts = jnp.squeeze(wts)
-        wts[len(wts) // 2] = 0
+        wts = wts.at[len(wts) // 2].set(0)
         wts = wts.reshape(kvec[direction].shape)
         return wts
     else:
