@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "A simple Particle-Mesh implementation in JAX"
 authors = [{ name = "JaxPM developers" }]
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = { file = "LICENSE" }
 urls = { "Homepage" = "https://github.com/DifferentiableUniverseInitiative/JaxPM" }
 dependencies = [
@@ -23,9 +23,19 @@ test = [
   "pytest",
   "diffrax"
 ]
+bench = [
+  "jax-hpc-profiler"
+]
 
 [tool.setuptools]
 packages = ["jaxpm"]
 
 [tool.setuptools_scm]
 version_file = "jaxpm/_version.py"
+
+
+[tool.uv]
+default-groups = []
+
+[tool.uv.sources]
+jax-cosmo = {branch = "better-cache", git = "https://github.com/ASKabalan/jax_cosmo"}

@@ -71,10 +71,10 @@ def slice_unpad_impl(x, pad_width):
     halo_y, _ = pad_width[1]
     # Apply corrections along x
     x = x.at[halo_x:halo_x + halo_x // 2].add(x[:halo_x // 2])
-    x = x.at[-(halo_x + halo_x // 2):-halo_x].add(x[-halo_x // 2:])
+    x = x.at[-(halo_x + halo_x // 2):-halo_x].add(x[-(halo_x // 2):])
     # Apply corrections along y
     x = x.at[:, halo_y:halo_y + halo_y // 2].add(x[:, :halo_y // 2])
-    x = x.at[:, -(halo_y + halo_y // 2):-halo_y].add(x[:, -halo_y // 2:])
+    x = x.at[:, -(halo_y + halo_y // 2):-halo_y].add(x[:, -(halo_y // 2):])
 
     unpad_slice = [slice(None)] * 3
     if halo_x > 0:

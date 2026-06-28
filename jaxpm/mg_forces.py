@@ -22,7 +22,6 @@ import jax.numpy as jnp
 
 from jaxpm import multigrid as _mg
 
-
 # 3D-tuned multigrid defaults (see mg_comparison/FINDINGS.md): omega~6/7, wide-halo CA smoother.
 _mg.CA_OMEGA = 0.857
 _mg.CA_WMAX = 4
@@ -56,15 +55,23 @@ def mg_potential(delta,
     `u0` is an optional warm-start initial guess (previous-step phi). Returns phi (real, f32).
     """
     _mg.CA_OMEGA = float(omega)
-    _mg.set_field_axes(mesh)                    # match MG halo specs to the field's mesh axes
-    delta = delta - jnp.mean(delta)            # solvability: zero-mean source (FFT zeros k=0)
+    _mg.set_field_axes(mesh)  # match MG halo specs to the field's mesh axes
+    delta = delta - jnp.mean(
+        delta)  # solvability: zero-mean source (FFT zeros k=0)
     F = delta.astype(jnp.float32)
     if levels is None:
         levels = infer_levels(F.shape)
     U0 = jnp.zeros_like(F) if u0 is None else u0.astype(jnp.float32)
-    return _mg.poisson_multigrid_halo(F, U0, l=int(levels), v1=int(v1), v2=int(v2),
-                                      mu=int(mu), iter_cycle=int(cycles), h=1.0,
-                                      mesh=mesh, agg_n=int(agg_n))
+    return _mg.poisson_multigrid_halo(F,
+                                      U0,
+                                      l=int(levels),
+                                      v1=int(v1),
+                                      v2=int(v2),
+                                      mu=int(mu),
+                                      iter_cycle=int(cycles),
+                                      h=1.0,
+                                      mesh=mesh,
+                                      agg_n=int(agg_n))
 
 
 def fd_gradient(phi, axis, order=4):
@@ -76,8 +83,8 @@ def fd_gradient(phi, axis, order=4):
     if order == 2:
         return 0.5 * (jnp.roll(phi, -1, axis) - jnp.roll(phi, 1, axis))
     # 4th-order central:  (8(f_{n+1}-f_{n-1}) - (f_{n+2}-f_{n-2})) / 12
-    return (8.0 * (jnp.roll(phi, -1, axis) - jnp.roll(phi, 1, axis))
-            - (jnp.roll(phi, -2, axis) - jnp.roll(phi, 2, axis))) / 12.0
+    return (8.0 * (jnp.roll(phi, -1, axis) - jnp.roll(phi, 1, axis)) -
+            (jnp.roll(phi, -2, axis) - jnp.roll(phi, 2, axis))) / 12.0
 
 
 def mg_force_field(delta, *, grad_order=4, **mg_kwargs):
@@ -87,5 +94,6 @@ def mg_force_field(delta, *, grad_order=4, **mg_kwargs):
     as next step's u0 (optionally growth-scaled).
     """
     phi = mg_potential(delta, **mg_kwargs)
-    forces = jnp.stack([-fd_gradient(phi, i, order=grad_order) for i in range(3)], axis=-1)
+    forces = jnp.stack(
+        [-fd_gradient(phi, i, order=grad_order) for i in range(3)], axis=-1)
     return forces, phi

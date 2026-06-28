@@ -6,7 +6,8 @@ from jaxpm.growth import (dGf2a, dGfa, growth_factor, growth_factor_second,
                           growth_rate, growth_rate_second)
 from jaxpm.kernels import (PGD_kernel, fftk, gradient_kernel,
                            invlaplace_kernel, longrange_kernel)
-from jaxpm.painting import cic_paint, cic_paint_dx, cic_read, cic_read_dx
+from jaxpm.painting import (cic_paint, cic_paint_dx, cic_read, cic_read_dx,
+                            paint, readout)
 
 
 def pm_forces(positions,
@@ -16,6 +17,7 @@ def pm_forces(positions,
               paint_absolute_pos=True,
               halo_size=0,
               sharding=None,
+              order='CIC',
               solver="fft",
               mg_params=None,
               u0=None,
@@ -24,6 +26,10 @@ def pm_forces(positions,
     """
     Computes gravitational forces on particles using a PM scheme.
 
+    order : mass-assignment scheme for painting/readout, passed to the stencil
+            ``jaxpm.painting.paint`` / ``readout`` (NGP/CIC/TSC/PCS, name or
+            integer 1-4). Default 'CIC'. The stencil scatter/gather is faster and
+            more memory-frugal than the deprecated chunked cic_paint scheme.
     solver : "fft" (default, jaxdecomp FFT Poisson solve) or "mg" (real-space halo multigrid).
     mg_params : dict of multigrid knobs (cycles, v1, v2, omega, levels, agg_n) for solver="mg".
     u0 : optional warm-start potential (previous step's phi, e.g. growth-scaled) for solver="mg".
@@ -36,19 +42,30 @@ def pm_forces(positions,
           "If mesh_shape is not provided, delta should be provided"
         mesh_shape = delta.shape
 
+    # initial_particles=None -> absolute positions; 'uniform' -> displacements
+    # from the uniform grid (the multi-device-friendly mode).
+    initial_particles = None if paint_absolute_pos else 'uniform'
     if paint_absolute_pos:
-        paint_fn = lambda pos: cic_paint(jnp.zeros(shape=mesh_shape,
-                                                   device=sharding),
-                                         pos,
-                                         halo_size=halo_size,
-                                         sharding=sharding)
-        read_fn = lambda grid_mesh, pos: cic_read(
-            grid_mesh, pos, halo_size=halo_size, sharding=sharding)
+        paint_fn = lambda pos: paint(pos,
+                                     grid_mesh=jnp.zeros(shape=mesh_shape,
+                                                         device=sharding),
+                                     initial_particles=None,
+                                     order=order,
+                                     halo_size=halo_size,
+                                     sharding=sharding)
     else:
-        paint_fn = lambda disp: cic_paint_dx(
-            disp, halo_size=halo_size, sharding=sharding)
-        read_fn = lambda grid_mesh, disp: cic_read_dx(
-            grid_mesh, disp, halo_size=halo_size, sharding=sharding)
+        paint_fn = lambda disp: paint(disp,
+                                      initial_particles='uniform',
+                                      order=order,
+                                      halo_size=halo_size,
+                                      sharding=sharding)
+    read_fn = lambda grid_mesh, pos: readout(grid_mesh,
+                                             pos,
+                                             initial_particles=
+                                             initial_particles,
+                                             order=order,
+                                             halo_size=halo_size,
+                                             sharding=sharding)
 
     if solver == "mg":
         # Real-space multigrid Poisson + finite-difference gradient (warm-startable; no FFT).
@@ -58,12 +75,17 @@ def pm_forces(positions,
         elif jnp.isrealobj(delta):
             field = delta
         else:
-            raise ValueError("solver='mg' needs a real-space density (got delta_k); "
-                             "pass delta=<real field> or positions.")
+            raise ValueError(
+                "solver='mg' needs a real-space density (got delta_k); "
+                "pass delta=<real field> or positions.")
         mesh = sharding.mesh if sharding is not None else None
-        force_mesh, phi = mg_force_field(field, mesh=mesh, u0=u0, **(mg_params or {}))
-        forces = jnp.stack([
-            read_fn(force_mesh[..., i], positions) for i in range(3)], axis=-1)
+        force_mesh, phi = mg_force_field(field,
+                                         mesh=mesh,
+                                         u0=u0,
+                                         **(mg_params or {}))
+        forces = jnp.stack(
+            [read_fn(force_mesh[..., i], positions) for i in range(3)],
+            axis=-1)
         return (forces, phi) if return_potential else forces
 
     if delta is None:

@@ -23,7 +23,6 @@ from jax.experimental.shard_map import shard_map
 from jax.sharding import Mesh, NamedSharding
 from jax.sharding import PartitionSpec as P
 
-
 Array = jnp.ndarray
 FIELD_SPEC = P("z", "y", None)
 
@@ -51,7 +50,8 @@ def _pad_local_xy(u: Array, mesh: Mesh, width: int = 1) -> Array:
 
     @partial(shard_map, mesh=mesh, in_specs=FIELD_SPEC, out_specs=FIELD_SPEC)
     def _pad(a):
-        return jnp.pad(a, ((width, width), (width, width), (0, 0)), mode="wrap")
+        return jnp.pad(a, ((width, width), (width, width), (0, 0)),
+                       mode="wrap")
 
     return _pad(u)
 
@@ -64,11 +64,13 @@ def _exchange_xy(
 ) -> Array:
     """Return local x/y padded array with exchanged periodic ghost zones."""
     if not _has_mesh(mesh):
-        return jnp.pad(u, ((width, width), (width, width), (0, 0)), mode="wrap")
+        return jnp.pad(u, ((width, width), (width, width), (0, 0)),
+                       mode="wrap")
 
     from jaxdecomp import halo_exchange
 
-    padded = _pad_local_xy(u, mesh, width=width)  # global shape includes per-shard halos.
+    padded = _pad_local_xy(
+        u, mesh, width=width)  # global shape includes per-shard halos.
     return halo_exchange(
         padded,
         halo_extents=(width, width),
@@ -81,7 +83,8 @@ def _halo_slices_xy(h: Array, mesh: Optional[Mesh]):
     """Extract local core and x/y neighbors from a per-shard halo-padded array."""
     if not _has_mesh(mesh):
         c = h[1:-1, 1:-1, :]
-        return c, h[:-2, 1:-1, :], h[2:, 1:-1, :], h[1:-1, :-2, :], h[1:-1, 2:, :]
+        return c, h[:-2, 1:-1, :], h[2:, 1:-1, :], h[1:-1, :-2, :], h[1:-1,
+                                                                      2:, :]
 
     @partial(
         shard_map,
@@ -105,64 +108,49 @@ def _laplace_from_halo(hx: Array, mesh: Optional[Mesh]) -> Array:
     """Compute neighbor sum minus 6*center from an exchanged halo array."""
     if not _has_mesh(mesh):
         center = hx[1:-1, 1:-1, :]
-        sum_n = (
-            hx[:-2, 1:-1, :]
-            + hx[2:, 1:-1, :]
-            + hx[1:-1, :-2, :]
-            + hx[1:-1, 2:, :]
-            + jnp.roll(center, 1, 2)
-            + jnp.roll(center, -1, 2)
-        )
+        sum_n = (hx[:-2, 1:-1, :] + hx[2:, 1:-1, :] + hx[1:-1, :-2, :] +
+                 hx[1:-1, 2:, :] + jnp.roll(center, 1, 2) +
+                 jnp.roll(center, -1, 2))
         return sum_n - 6.0 * center
 
     @partial(shard_map, mesh=mesh, in_specs=FIELD_SPEC, out_specs=FIELD_SPEC)
     def _local(a):
         center = a[1:-1, 1:-1, :]
-        sum_n = (
-            a[:-2, 1:-1, :]
-            + a[2:, 1:-1, :]
-            + a[1:-1, :-2, :]
-            + a[1:-1, 2:, :]
-            + jnp.roll(center, 1, 2)
-            + jnp.roll(center, -1, 2)
-        )
+        sum_n = (a[:-2, 1:-1, :] + a[2:, 1:-1, :] + a[1:-1, :-2, :] +
+                 a[1:-1, 2:, :] + jnp.roll(center, 1, 2) +
+                 jnp.roll(center, -1, 2))
         return sum_n - 6.0 * center
 
     return _local(hx)
 
 
-def _jacobi_from_halo(hx: Array, F: Array, h: float, mesh: Optional[Mesh], omega: float) -> Array:
+def _jacobi_from_halo(hx: Array, F: Array, h: float, mesh: Optional[Mesh],
+                      omega: float) -> Array:
     if not _has_mesh(mesh):
         center = hx[1:-1, 1:-1, :]
-        sum_n = (
-            hx[:-2, 1:-1, :]
-            + hx[2:, 1:-1, :]
-            + hx[1:-1, :-2, :]
-            + hx[1:-1, 2:, :]
-            + jnp.roll(center, 1, 2)
-            + jnp.roll(center, -1, 2)
-        )
+        sum_n = (hx[:-2, 1:-1, :] + hx[2:, 1:-1, :] + hx[1:-1, :-2, :] +
+                 hx[1:-1, 2:, :] + jnp.roll(center, 1, 2) +
+                 jnp.roll(center, -1, 2))
         u_star = (sum_n - (h * h) * F) / 6.0
         return (1.0 - omega) * center + omega * u_star
 
-    @partial(shard_map, mesh=mesh, in_specs=(FIELD_SPEC, FIELD_SPEC), out_specs=FIELD_SPEC)
+    @partial(shard_map,
+             mesh=mesh,
+             in_specs=(FIELD_SPEC, FIELD_SPEC),
+             out_specs=FIELD_SPEC)
     def _local(a, f):
         center = a[1:-1, 1:-1, :]
-        sum_n = (
-            a[:-2, 1:-1, :]
-            + a[2:, 1:-1, :]
-            + a[1:-1, :-2, :]
-            + a[1:-1, 2:, :]
-            + jnp.roll(center, 1, 2)
-            + jnp.roll(center, -1, 2)
-        )
+        sum_n = (a[:-2, 1:-1, :] + a[2:, 1:-1, :] + a[1:-1, :-2, :] +
+                 a[1:-1, 2:, :] + jnp.roll(center, 1, 2) +
+                 jnp.roll(center, -1, 2))
         u_star = (sum_n - (h * h) * f) / 6.0
         return (1.0 - omega) * center + omega * u_star
 
     return _local(hx, F)
 
 
-def _smooth_axis_from_halo(hx: Array, axis: int, mesh: Optional[Mesh]) -> Array:
+def _smooth_axis_from_halo(hx: Array, axis: int,
+                           mesh: Optional[Mesh]) -> Array:
     """Apply 1D [1/4, 1/2, 1/4] smoothing along x or y from halo."""
     if axis not in (0, 1):
         raise ValueError(axis)
@@ -185,16 +173,24 @@ def _smooth_axis_from_halo(hx: Array, axis: int, mesh: Optional[Mesh]) -> Array:
     return _local_x(hx) if axis == 0 else _local_y(hx)
 
 
-def apply_poisson_halo(u: Array, h: float, mesh: Optional[Mesh] = None, halo_backend: str = "jax") -> Array:
+def apply_poisson_halo(u: Array,
+                       h: float,
+                       mesh: Optional[Mesh] = None,
+                       halo_backend: str = "jax") -> Array:
     """A u = periodic 6-point Laplacian, using exchanged halos for sharded x/y."""
     if u.ndim != 3:
-        raise ValueError(f"apply_poisson_halo expects 3D arrays, got shape {u.shape}")
+        raise ValueError(
+            f"apply_poisson_halo expects 3D arrays, got shape {u.shape}")
 
     hx = _exchange_xy(u, mesh, halo_backend)
     return _laplace_from_halo(hx, mesh) / (h * h)
 
 
-def residual_halo(F: Array, u: Array, h: float, mesh: Optional[Mesh] = None, halo_backend: str = "jax") -> Array:
+def residual_halo(F: Array,
+                  u: Array,
+                  h: float,
+                  mesh: Optional[Mesh] = None,
+                  halo_backend: str = "jax") -> Array:
     return F - apply_poisson_halo(u, h, mesh=mesh, halo_backend=halo_backend)
 
 
@@ -219,7 +215,8 @@ CA_WMAX = 4
 CA_OMEGA = 2.0 / 3.0
 
 
-def _ca_local_sweeps(u_pad: Array, F_pad: Array, w: int, h: float, omega: float) -> Array:
+def _ca_local_sweeps(u_pad: Array, F_pad: Array, w: int, h: float,
+                     omega: float) -> Array:
     """Do `w` weighted-Jacobi sweeps on an x/y width-w halo-padded, z-periodic block.
     Returns the valid core [w:-w, w:-w, :]. Numerically identical to w global sweeps."""
     hh = h * h
@@ -228,14 +225,8 @@ def _ca_local_sweeps(u_pad: Array, F_pad: Array, w: int, h: float, omega: float)
     fc = F_pad[1:-1, 1:-1, :]
     for _ in range(w):
         c = u[1:-1, 1:-1, :]
-        sum_n = (
-            u[:-2, 1:-1, :]
-            + u[2:, 1:-1, :]
-            + u[1:-1, :-2, :]
-            + u[1:-1, 2:, :]
-            + jnp.roll(c, 1, 2)
-            + jnp.roll(c, -1, 2)
-        )
+        sum_n = (u[:-2, 1:-1, :] + u[2:, 1:-1, :] + u[1:-1, :-2, :] +
+                 u[1:-1, 2:, :] + jnp.roll(c, 1, 2) + jnp.roll(c, -1, 2))
         u_star = (sum_n - hh * fc) * inv6
         u = u.at[1:-1, 1:-1, :].set((1.0 - omega) * c + omega * u_star)
     return u[w:-w, w:-w, :]
@@ -265,7 +256,11 @@ def smooth_weighted_jacobi_halo(
         if not _has_mesh(mesh):
             u = _ca_local_sweeps(u_pad, F_pad, w, h, omega)
         else:
-            @partial(shard_map, mesh=mesh, in_specs=(FIELD_SPEC, FIELD_SPEC), out_specs=FIELD_SPEC)
+
+            @partial(shard_map,
+                     mesh=mesh,
+                     in_specs=(FIELD_SPEC, FIELD_SPEC),
+                     out_specs=FIELD_SPEC)
             def _local(a, f, _w=w):
                 return _ca_local_sweeps(a, f, _w, h, omega)
 
@@ -299,8 +294,14 @@ def _restrict(F, U, h, mesh=None, halo_backend="jax"):
     """Restricted full-weighted residual; cheap (residual+separable) or fused 27-term."""
     if CA_CHEAP_RESTRICT:
         res = residual_halo(F, U, h, mesh=mesh, halo_backend=halo_backend)
-        return restrict_full_weighting_halo(res, mesh=mesh, halo_backend=halo_backend)
-    return restrict_residual_halo(F, U, h, mesh=mesh, halo_backend=halo_backend)
+        return restrict_full_weighting_halo(res,
+                                            mesh=mesh,
+                                            halo_backend=halo_backend)
+    return restrict_residual_halo(F,
+                                  U,
+                                  h,
+                                  mesh=mesh,
+                                  halo_backend=halo_backend)
 
 
 def restrict_residual_halo(
@@ -316,17 +317,18 @@ def restrict_residual_halo(
     inv_h2 = 1.0 / (h * h)
 
     def _sample_z(a: Array, zoff: int, nz_coarse: int) -> Array:
-        return jnp.roll(a, -zoff, axis=2)[..., : 2 * nz_coarse : 2]
+        return jnp.roll(a, -zoff, axis=2)[..., :2 * nz_coarse:2]
 
-    def _residual_sample(fh: Array, uh: Array, xoff: int, yoff: int, zoff: int) -> Array:
+    def _residual_sample(fh: Array, uh: Array, xoff: int, yoff: int,
+                         zoff: int) -> Array:
         nx_coarse = (fh.shape[0] - 2) // 2
         ny_coarse = (fh.shape[1] - 2) // 2
         nz_coarse = fh.shape[2] // 2
 
         def _xy(a: Array, xstart: int, ystart: int) -> Array:
             return a[
-                xstart : xstart + 2 * nx_coarse : 2,
-                ystart : ystart + 2 * ny_coarse : 2,
+                xstart:xstart + 2 * nx_coarse:2,
+                ystart:ystart + 2 * ny_coarse:2,
                 :,
             ]
 
@@ -338,15 +340,12 @@ def restrict_residual_halo(
         uyp_xy = _xy(uh, 2 + xoff, 3 + yoff)
 
         uc = _sample_z(uc_xy, zoff, nz_coarse)
-        lap = (
-            _sample_z(uxm_xy, zoff, nz_coarse)
-            + _sample_z(uxp_xy, zoff, nz_coarse)
-            + _sample_z(uym_xy, zoff, nz_coarse)
-            + _sample_z(uyp_xy, zoff, nz_coarse)
-            + _sample_z(uc_xy, zoff - 1, nz_coarse)
-            + _sample_z(uc_xy, zoff + 1, nz_coarse)
-            - 6.0 * uc
-        )
+        lap = (_sample_z(uxm_xy, zoff, nz_coarse) +
+               _sample_z(uxp_xy, zoff, nz_coarse) +
+               _sample_z(uym_xy, zoff, nz_coarse) +
+               _sample_z(uyp_xy, zoff, nz_coarse) +
+               _sample_z(uc_xy, zoff - 1, nz_coarse) +
+               _sample_z(uc_xy, zoff + 1, nz_coarse) - 6.0 * uc)
         return f - lap * inv_h2
 
     def _restrict_local(fh: Array, uh: Array) -> Array:
@@ -354,21 +353,26 @@ def restrict_residual_halo(
         for xoff, wx in ((-1, 0.25), (0, 0.5), (1, 0.25)):
             for yoff, wy in ((-1, 0.25), (0, 0.5), (1, 0.25)):
                 for zoff, wz in ((-1, 0.25), (0, 0.5), (1, 0.25)):
-                    term = (wx * wy * wz) * _residual_sample(fh, uh, xoff, yoff, zoff)
+                    term = (wx * wy * wz) * _residual_sample(
+                        fh, uh, xoff, yoff, zoff)
                     out = term if out is None else out + term
         return out
 
     if not _has_mesh(mesh):
         return _restrict_local(F_halo, U_halo)
 
-    @partial(shard_map, mesh=mesh, in_specs=(FIELD_SPEC, FIELD_SPEC), out_specs=FIELD_SPEC)
+    @partial(shard_map,
+             mesh=mesh,
+             in_specs=(FIELD_SPEC, FIELD_SPEC),
+             out_specs=FIELD_SPEC)
     def _local(fh, uh):
         return _restrict_local(fh, uh)
 
     return _local(F_halo, U_halo)
 
 
-def _prolong_add_from_halo(U: Array, Ec_halo: Array, mesh: Optional[Mesh]) -> Array:
+def _prolong_add_from_halo(U: Array, Ec_halo: Array,
+                           mesh: Optional[Mesh]) -> Array:
     """Add trilinear prolongation of halo-padded coarse correction into fine U."""
     if not _has_mesh(mesh):
         c = Ec_halo[1:-1, 1:-1, :]
@@ -389,10 +393,14 @@ def _prolong_add_from_halo(U: Array, Ec_halo: Array, mesh: Optional[Mesh]) -> Ar
         out = out.at[1::2, 1::2, 0::2].add(0.25 * (c + xp + yp + xyp))
         out = out.at[1::2, 0::2, 1::2].add(0.25 * (c + xp + cz + xpz))
         out = out.at[0::2, 1::2, 1::2].add(0.25 * (c + yp + cz + ypz))
-        out = out.at[1::2, 1::2, 1::2].add(0.125 * (c + xp + yp + xyp + cz + xpz + ypz + xypz))
+        out = out.at[1::2, 1::2, 1::2].add(
+            0.125 * (c + xp + yp + xyp + cz + xpz + ypz + xypz))
         return out
 
-    @partial(shard_map, mesh=mesh, in_specs=(FIELD_SPEC, FIELD_SPEC), out_specs=FIELD_SPEC)
+    @partial(shard_map,
+             mesh=mesh,
+             in_specs=(FIELD_SPEC, FIELD_SPEC),
+             out_specs=FIELD_SPEC)
     def _local(u, ec):
         c = ec[1:-1, 1:-1, :]
         xp = ec[2:, 1:-1, :]
@@ -412,7 +420,8 @@ def _prolong_add_from_halo(U: Array, Ec_halo: Array, mesh: Optional[Mesh]) -> Ar
         out = out.at[1::2, 1::2, 0::2].add(0.25 * (c + xp + yp + xyp))
         out = out.at[1::2, 0::2, 1::2].add(0.25 * (c + xp + cz + xpz))
         out = out.at[0::2, 1::2, 1::2].add(0.25 * (c + yp + cz + ypz))
-        out = out.at[1::2, 1::2, 1::2].add(0.125 * (c + xp + yp + xyp + cz + xpz + ypz + xypz))
+        out = out.at[1::2, 1::2, 1::2].add(
+            0.125 * (c + xp + yp + xyp + cz + xpz + ypz + xypz))
         return out
 
     return _local(U, Ec_halo)
@@ -462,8 +471,16 @@ def _agg_coarse_solve(
         local_l += 1
     local_l = max(local_l, int(level))
     E_r = poisson_multigrid_halo(
-        F_r, U_r, l=local_l, v1=v1, v2=v2, mu=mu, iter_cycle=1, h=h,
-        mesh=None, halo_backend=halo_backend,
+        F_r,
+        U_r,
+        l=local_l,
+        v1=v1,
+        v2=v2,
+        mu=mu,
+        iter_cycle=1,
+        h=h,
+        mesh=None,
+        halo_backend=halo_backend,
     )
     return jax.lax.with_sharding_constraint(E_r, shd)
 
@@ -483,15 +500,29 @@ def _cycle_halo(
 ) -> Array:
     # Agglomerate the coarse levels onto one replicated copy once the grid is small enough.
     if _has_mesh(mesh) and agg_n > 0 and 2 < min(U.shape) <= agg_n:
-        return _agg_coarse_solve(
-            F, U, level, h, mesh=mesh, halo_backend=halo_backend, v1=v1, v2=v2, mu=mu
-        )
+        return _agg_coarse_solve(F,
+                                 U,
+                                 level,
+                                 h,
+                                 mesh=mesh,
+                                 halo_backend=halo_backend,
+                                 v1=v1,
+                                 v2=v2,
+                                 mu=mu)
     if level <= 0 or min(U.shape) <= 2:
-        return smooth_weighted_jacobi_halo(
-            U, F, h, iters=16, mesh=mesh, halo_backend=halo_backend
-        )
+        return smooth_weighted_jacobi_halo(U,
+                                           F,
+                                           h,
+                                           iters=16,
+                                           mesh=mesh,
+                                           halo_backend=halo_backend)
 
-    U = smooth_weighted_jacobi_halo(U, F, h, iters=v1, mesh=mesh, halo_backend=halo_backend)
+    U = smooth_weighted_jacobi_halo(U,
+                                    F,
+                                    h,
+                                    iters=v1,
+                                    mesh=mesh,
+                                    halo_backend=halo_backend)
     Rc = _restrict(F, U, h, mesh=mesh, halo_backend=halo_backend)
 
     Ec = jnp.zeros_like(Rc, dtype=U.dtype)
@@ -510,7 +541,12 @@ def _cycle_halo(
         )
 
     U = prolong_add_halo(U, Ec, mesh=mesh, halo_backend=halo_backend)
-    return smooth_weighted_jacobi_halo(U, F, h, iters=v2, mesh=mesh, halo_backend=halo_backend)
+    return smooth_weighted_jacobi_halo(U,
+                                       F,
+                                       h,
+                                       iters=v2,
+                                       mesh=mesh,
+                                       halo_backend=halo_backend)
 
 
 # Full-multigrid (nested iteration) toggle. FMG restricts the RHS to the bottom, solves, and
@@ -528,7 +564,9 @@ CA_FMG_INJECT = False
 def _restrict_rhs(F, mesh, halo_backend):
     if CA_FMG_INJECT:
         return F[::2, ::2, ::2]
-    return restrict_full_weighting_halo(F, mesh=mesh, halo_backend=halo_backend)
+    return restrict_full_weighting_halo(F,
+                                        mesh=mesh,
+                                        halo_backend=halo_backend)
 
 
 def _fmg_halo(
@@ -558,27 +596,57 @@ def _fmg_halo(
             local_l += 1
         local_l = max(local_l, int(level))
         U_r = _fmg_halo(
-            F_r, local_l, h, mesh=None, halo_backend=halo_backend,
-            v1=v1, v2=v2, mu=mu, agg_n=0, n_fmg=n_fmg,
+            F_r,
+            local_l,
+            h,
+            mesh=None,
+            halo_backend=halo_backend,
+            v1=v1,
+            v2=v2,
+            mu=mu,
+            agg_n=0,
+            n_fmg=n_fmg,
         )
         return jax.lax.with_sharding_constraint(U_r, shd)
 
     if level <= 0 or min(F.shape) <= 2:
-        return smooth_weighted_jacobi_halo(
-            jnp.zeros_like(F), F, h, iters=16, mesh=mesh, halo_backend=halo_backend
-        )
+        return smooth_weighted_jacobi_halo(jnp.zeros_like(F),
+                                           F,
+                                           h,
+                                           iters=16,
+                                           mesh=mesh,
+                                           halo_backend=halo_backend)
 
     # Restrict the RHS, FMG-solve the coarse problem, prolong as the fine initial guess.
     Fc = _restrict_rhs(F, mesh, halo_backend)
     Uc = _fmg_halo(
-        Fc, level - 1, 2.0 * h, mesh=mesh, halo_backend=halo_backend,
-        v1=v1, v2=v2, mu=mu, agg_n=agg_n, n_fmg=n_fmg,
+        Fc,
+        level - 1,
+        2.0 * h,
+        mesh=mesh,
+        halo_backend=halo_backend,
+        v1=v1,
+        v2=v2,
+        mu=mu,
+        agg_n=agg_n,
+        n_fmg=n_fmg,
     )
-    U = prolong_add_halo(jnp.zeros_like(F), Uc, mesh=mesh, halo_backend=halo_backend)
+    U = prolong_add_halo(jnp.zeros_like(F),
+                         Uc,
+                         mesh=mesh,
+                         halo_backend=halo_backend)
     for _ in range(int(n_fmg)):
         U = _cycle_halo(
-            F, U, level, h, mesh=mesh, halo_backend=halo_backend,
-            v1=v1, v2=v2, mu=mu, agg_n=agg_n,
+            F,
+            U,
+            level,
+            h,
+            mesh=mesh,
+            halo_backend=halo_backend,
+            v1=v1,
+            v2=v2,
+            mu=mu,
+            agg_n=agg_n,
         )
     return U
 
@@ -600,14 +668,30 @@ def poisson_multigrid_halo(
     """Solve A phi = F with fixed halo-backed V/W-cycles (or FMG when CA_FMG)."""
     if CA_FMG:
         U_out = _fmg_halo(
-            F, int(l), h, mesh=mesh, halo_backend=halo_backend,
-            v1=int(v1), v2=int(v2), mu=int(mu), agg_n=int(agg_n), n_fmg=int(CA_FMG_NCYCLE),
+            F,
+            int(l),
+            h,
+            mesh=mesh,
+            halo_backend=halo_backend,
+            v1=int(v1),
+            v2=int(v2),
+            mu=int(mu),
+            agg_n=int(agg_n),
+            n_fmg=int(CA_FMG_NCYCLE),
         )
         # Optional extra full V-cycles after the FMG pass (iter_cycle-1 of them).
         for _ in range(int(iter_cycle) - 1):
             U_out = _cycle_halo(
-                F, U_out, int(l), h, mesh=mesh, halo_backend=halo_backend,
-                v1=int(v1), v2=int(v2), mu=int(mu), agg_n=int(agg_n),
+                F,
+                U_out,
+                int(l),
+                h,
+                mesh=mesh,
+                halo_backend=halo_backend,
+                v1=int(v1),
+                v2=int(v2),
+                mu=int(mu),
+                agg_n=int(agg_n),
             )
         return U_out
     U_out = U
@@ -674,8 +758,9 @@ def make_poisson_mg_halo_solver(
     if jit_solver:
         return jax.jit(_solve)
 
-    @partial(jax.jit, static_argnums=(2, 3), donate_argnums=(0,))
-    def _smooth_staged(U: Array, F: Array, h_level: float, iters: int) -> Array:
+    @partial(jax.jit, static_argnums=(2, 3), donate_argnums=(0, ))
+    def _smooth_staged(U: Array, F: Array, h_level: float,
+                       iters: int) -> Array:
         return smooth_weighted_jacobi_halo(
             U,
             F,
@@ -685,7 +770,7 @@ def make_poisson_mg_halo_solver(
             halo_backend=halo_backend,
         )
 
-    @partial(jax.jit, static_argnums=(2,))
+    @partial(jax.jit, static_argnums=(2, ))
     def _restrict_staged(F: Array, U: Array, h_level: float) -> Array:
         return _restrict(F, U, h_level, mesh=mesh, halo_backend=halo_backend)
 
@@ -695,9 +780,15 @@ def make_poisson_mg_halo_solver(
 
     @partial(jax.jit, static_argnums=(2, 3))
     def _agg_staged(F: Array, U: Array, level: int, h_level: float) -> Array:
-        return _agg_coarse_solve(
-            F, U, level, h_level, mesh=mesh, halo_backend=halo_backend, v1=v1, v2=v2, mu=mu
-        )
+        return _agg_coarse_solve(F,
+                                 U,
+                                 level,
+                                 h_level,
+                                 mesh=mesh,
+                                 halo_backend=halo_backend,
+                                 v1=v1,
+                                 v2=v2,
+                                 mu=mu)
 
     def _cycle_staged(F: Array, U: Array, level: int, h_level: float) -> Array:
         # Agglomerate onto one replicated copy once the grid is small (kills the deepest,
