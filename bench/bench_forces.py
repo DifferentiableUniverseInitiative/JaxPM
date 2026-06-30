@@ -270,7 +270,9 @@ def main():
                      v1=args.v,
                      v2=args.v,
                      omega=args.omega,
-                     agg_n=args.agg_n,
+                     agg_n=max(args.agg_n, n),  # agglomeration must fire before the
+                                                # sharded axis coarsens below 1 cell/shard
+                                                # (needs agg_n >= pdims); see multigrid._cycle_halo
                      grad_order=args.grad_order)
     mg_params_warm = {**mg_params, "cycles": args.warm_cycles}
 
