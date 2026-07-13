@@ -5,8 +5,9 @@ from jax import numpy as jnp
 from numpy.testing import assert_allclose
 
 from jaxpm.distributed import uniform_particles
+from jaxpm.ode import make_diffrax_ode
 from jaxpm.painting import cic_paint, cic_paint_dx
-from jaxpm.pm import lpt, make_diffrax_ode
+from jaxpm.pm import lpt
 from jaxpm.utils import power_spectrum
 
 _TOLERANCE = 1e-4

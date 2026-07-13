@@ -22,8 +22,9 @@ from jax.sharding import NamedSharding
 from jax.sharding import PartitionSpec as P
 
 from jaxpm.kernels import interpolate_power_spectrum
+from jaxpm.ode import make_diffrax_ode
 from jaxpm.painting import cic_paint_dx
-from jaxpm.pm import linear_field, lpt, make_diffrax_ode
+from jaxpm.pm import linear_field, lpt
 
 all_gather = partial(process_allgather, tiled=True)
 

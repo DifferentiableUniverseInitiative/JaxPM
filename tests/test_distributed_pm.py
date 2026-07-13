@@ -19,8 +19,9 @@ from jaxdecomp import get_fft_output_sharding
 
 from jaxpm.distributed import uniform_particles  # noqa : E402
 from jaxpm.distributed import fft3d, ifft3d, normal_field  # noqa : E402
+from jaxpm.ode import make_diffrax_ode  # noqa : E402
 from jaxpm.painting import cic_paint, cic_paint_dx  # noqa : E402
-from jaxpm.pm import lpt, make_diffrax_ode, pm_forces  # noqa : E402
+from jaxpm.pm import lpt, pm_forces  # noqa : E402
 
 _TOLERANCE = 1e-12  # 🎉🎉🎉
 
