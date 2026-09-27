@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13"]
 
     steps:
     - name: Checkout Source
@@ -58,9 +58,12 @@ jobs:
         # Depends on the new jax_cosmo cache (see ASKabalan:better-cache).
         # Temporary until the cache + import-error fixes merge upstream.
         pip install git+https://github.com/ASKabalan/jax_cosmo@better-cache
-        # PyPI jax-healpy 0.6 collapses multi-dim batch shapes in get_interp_weights /
-        # get_all_neighbours, breaking spherical.py broadcasting. This has been merged with CMBSciPol/jax-healpy#2, we will install from main until a new release.
-        pip install --force-reinstall --no-deps git+https://github.com/CMBSciPol/jax-healpy
+        # PyPI jax-healpy 0.6 collapsed multi-dim batch shapes in get_interp_weights /
+        # get_all_neighbours, breaking spherical.py broadcasting. Fixed upstream
+        # (CMBSciPol/jax-healpy#2) and released as 0.8.1, which pyproject.toml now
+        # floors; the explicit pin makes the resolution independent of the
+        # `pip install -e .[test]` cache above.
+        pip install "jax-healpy>=0.8.1"
         # Install test requirements with no-build-isolation for faster builds
         pip install -r requirements-test.txt --no-build-isolation
         echo "numpy version installed:"
