@@ -1,12 +1,15 @@
+import warnings
+
 import jax.numpy as jnp
 import jax_cosmo as jc
 
 from jaxpm.distributed import fft3d, ifft3d, normal_field
 from jaxpm.growth import (dGf2a, dGfa, growth_factor, growth_factor_second,
                           growth_rate, growth_rate_second)
-from jaxpm.kernels import (PGD_kernel, fftk, gradient_kernel,
-                           invlaplace_kernel, longrange_kernel)
-from jaxpm.painting import cic_paint, cic_paint_dx, cic_read, cic_read_dx
+from jaxpm.kernels import (PGD_kernel, compensation_kernel, fftk,
+                           gradient_kernel, invlaplace_kernel,
+                           longrange_kernel)
+from jaxpm.painting import paint, readout
 
 
 def _pad_rfft_3d(rk, n, m):
@@ -56,32 +59,65 @@ def pm_forces(positions,
               mesh_shape=None,
               delta=None,
               r_split=0,
-              paint_absolute_pos=True,
+              paint_absolute_pos=None,
               halo_size=0,
               sharding=None,
+              order='CIC',
+              deconvolution=False,
+              initial_particles=None,
               gradient_order=1,
               laplace_fd=False):
     """
-    Computes gravitational forces on particles using a PM scheme
+    Computes gravitational forces on particles using a PM scheme.
+
+    Parameters
+    ----------
+    order : int or str
+        Mass-assignment order forwarded to ``paint``/``readout``
+        (NGP=1, CIC=2, TSC=3, PCS=4).
+    deconvolution : bool
+        Deconvolve the assignment window from the painted density. Applied in
+        Fourier space (we are already in k-space for the PM kernels), which
+        avoids the FFT/iFFT round-trip of a real-space ``paint(deconvolution=True)``.
+    initial_particles : {None, 'uniform'}
+        ``None`` -> ``positions`` are absolute, ``'uniform'`` -> ``positions``
+        are displacements from a uniform grid.
+    gradient_order : int
+        Order of the ``gradient_kernel`` used to differentiate the potential
+        (0 = exact ``ik``, 1 = 4th-order finite-difference).
+    laplace_fd : bool
+        Use the finite-difference inverse-Laplace kernel for the Poisson solve.
+    paint_absolute_pos : bool, optional
+        Deprecated -- use ``initial_particles`` instead (``True`` -> ``None``,
+        ``False`` -> ``'uniform'``).
     """
     if mesh_shape is None:
         assert (delta is not None),\
           "If mesh_shape is not provided, delta should be provided"
         mesh_shape = delta.shape
 
-    if paint_absolute_pos:
-        paint_fn = lambda pos: cic_paint(jnp.zeros(shape=mesh_shape,
-                                                   device=sharding),
-                                         pos,
-                                         halo_size=halo_size,
-                                         sharding=sharding)
-        read_fn = lambda grid_mesh, pos: cic_read(
-            grid_mesh, pos, halo_size=halo_size, sharding=sharding)
-    else:
-        paint_fn = lambda disp: cic_paint_dx(
-            disp, halo_size=halo_size, sharding=sharding)
-        read_fn = lambda grid_mesh, disp: cic_read_dx(
-            grid_mesh, disp, halo_size=halo_size, sharding=sharding)
+    if paint_absolute_pos is not None:
+        warnings.warn(
+            "paint_absolute_pos is deprecated; use initial_particles instead "
+            "(None for absolute positions, 'uniform' for displacements).",
+            DeprecationWarning,
+            stacklevel=2)
+        initial_particles = None if paint_absolute_pos else 'uniform'
+
+    # Deconvolution are done opportunistically in Fourier space, so we can avoid the extra FFT/iFFT round-trip
+    paint_fn = lambda pos: paint(pos,
+                                 initial_particles=initial_particles,
+                                 order=order,
+                                 halo_size=halo_size,
+                                 sharding=sharding,
+                                 deconvolution=False)
+    read_fn = lambda grid_mesh, pos: readout(grid_mesh,
+                                             pos,
+                                             initial_particles=
+                                             initial_particles,
+                                             order=order,
+                                             halo_size=halo_size,
+                                             sharding=sharding)
 
     if delta is None:
         field = paint_fn(positions)
@@ -92,6 +128,10 @@ def pm_forces(positions,
         delta_k = delta
 
     kvec = fftk(delta_k)
+    # Deconvolve the assignment window directly in Fourier space (one multiply,
+    # no extra FFT/iFFT) -- only meaningful for the density we just painted.
+    if deconvolution and delta is None:
+        delta_k = delta_k * compensation_kernel(kvec, order)
     # Computes gravitational potential
     pot_k = delta_k * invlaplace_kernel(
         kvec, fd=laplace_fd) * longrange_kernel(kvec, r_split=r_split)
@@ -110,6 +150,7 @@ def lpt(cosmo,
         halo_size=0,
         sharding=None,
         order=1,
+        paint_order='CIC',
         gradient_order=1,
         laplace_fd=False,
         dealiased=False,
@@ -120,13 +161,18 @@ def lpt(cosmo,
 
     Parameters
     ----------
+    order : int
+        LPT order (1 or 2).
+    paint_order : int or str
+        Mass-assignment order forwarded to ``pm_forces`` (NGP=1, CIC=2,
+        TSC=3, PCS=4). Affects the force read-out interpolation.
     dealiased : bool
         Use 3/2 zero-padding to dealias the quadratic 2LPT source term.
     exact_growth : bool
         Use exact second-order growth factor coefficient instead of
         the Einstein-de Sitter approximation 3/7.
     """
-    paint_absolute_pos = particles is not None
+    initial_particles = None if particles is not None else 'uniform'
     if particles is None:
         particles = jnp.zeros_like(initial_conditions,
                                    shape=(*initial_conditions.shape, 3))
@@ -136,9 +182,10 @@ def lpt(cosmo,
     delta_k = fft3d(initial_conditions)
     initial_force = pm_forces(particles,
                               delta=delta_k,
-                              paint_absolute_pos=paint_absolute_pos,
+                              initial_particles=initial_particles,
                               halo_size=halo_size,
                               sharding=sharding,
+                              order=paint_order,
                               gradient_order=gradient_order,
                               laplace_fd=laplace_fd)
     dx = growth_factor(cosmo, a) * initial_force
@@ -189,9 +236,10 @@ def lpt(cosmo,
         delta_k2 = fft3d(delta2)
         init_force2 = pm_forces(particles,
                                 delta=delta_k2,
-                                paint_absolute_pos=paint_absolute_pos,
+                                initial_particles=initial_particles,
                                 halo_size=halo_size,
                                 sharding=sharding,
+                                order=paint_order,
                                 gradient_order=gradient_order,
                                 laplace_fd=laplace_fd)
 
@@ -236,7 +284,7 @@ def linear_field(mesh_shape, box_size, pk, seed, sharding=None):
     return field
 
 
-def pgd_correction(pos, mesh_shape, params):
+def pgd_correction(pos, mesh_shape, params, order='CIC', deconvolution=False):
     """
     improve the short-range interactions of PM-Nbody simulations with potential gradient descent method,
     based on https://arxiv.org/abs/1804.00671
@@ -244,17 +292,21 @@ def pgd_correction(pos, mesh_shape, params):
     args:
       pos: particle positions [npart, 3]
       params: [alpha, kl, ks] pgd parameters
+      order: mass-assignment order for paint/readout (NGP/CIC/TSC/PCS)
+      deconvolution: deconvolve the assignment window (in Fourier space)
     """
-    delta = cic_paint(jnp.zeros(mesh_shape), pos)
+    delta = paint(pos, grid_mesh=jnp.zeros(mesh_shape), order=order)
     delta_k = fft3d(delta)
     kvec = fftk(delta_k)
+    if deconvolution:
+        delta_k = delta_k * compensation_kernel(kvec, order)
     alpha, kl, ks = params
     PGD_range = PGD_kernel(kvec, kl, ks)
 
     pot_k_pgd = (delta_k * invlaplace_kernel(kvec)) * PGD_range
 
     forces_pgd = jnp.stack([
-        cic_read(fft3d(-gradient_kernel(kvec, i) * pot_k_pgd), pos)
+        readout(fft3d(-gradient_kernel(kvec, i) * pot_k_pgd), pos, order=order)
         for i in range(3)
     ],
                            axis=-1)

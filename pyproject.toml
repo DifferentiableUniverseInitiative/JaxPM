@@ -23,6 +23,13 @@ test = [
   "pytest",
   "diffrax"
 ]
+# Spherical (HEALPix) painting + window deconvolution. jax_healpy[recommended]
+# pulls s2fft (the harmonic-transform engine behind map2alm/alm2map); healpy is
+# needed for hp.pixwin in deconvolve_map (it is NOT pulled by [recommended]).
+spherical = [
+  "jax_healpy[recommended]",
+  "healpy"
+]
 
 [tool.setuptools]
 packages = ["jaxpm"]

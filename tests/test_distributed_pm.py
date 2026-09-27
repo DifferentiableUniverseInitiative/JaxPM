@@ -20,7 +20,7 @@ from jaxdecomp import get_fft_output_sharding
 from jaxpm.distributed import uniform_particles  # noqa : E402
 from jaxpm.distributed import fft3d, ifft3d, normal_field  # noqa : E402
 from jaxpm.ode import make_diffrax_ode  # noqa : E402
-from jaxpm.painting import cic_paint, cic_paint_dx  # noqa : E402
+from jaxpm.painting import paint  # noqa : E402
 from jaxpm.pm import lpt, pm_forces  # noqa : E402
 
 _TOLERANCE = 1e-12  # 🎉🎉🎉
@@ -32,10 +32,11 @@ jax.config.update("jax_enable_x64", True)  # Use double precision for accuracy
 
 @pytest.mark.distributed
 @pytest.mark.parametrize("order", [1, 2])
+@pytest.mark.parametrize("painting", ['cic', 'tsc', 'pcs'])
 @pytest.mark.parametrize("pdims", pdims)
 @pytest.mark.parametrize("absolute_painting", [True, False])
 def test_distrubted_pm(simulation_config, initial_conditions, cosmo, order,
-                       pdims, absolute_painting):
+                       pdims, absolute_painting, painting):
 
     if absolute_painting:
         pytest.skip("Absolute painting is not recommended in distributed mode")
@@ -45,10 +46,9 @@ def test_distrubted_pm(simulation_config, initial_conditions, cosmo, order,
 
     mesh_shape, box_shape = simulation_config
     print(
-        f"Running with {painting_str} painting and pdims {pdims} and order {order} and mesh shape {mesh_shape}..."
+        f"Running with {painting_str} painting ({painting}) and pdims {pdims} and order {order} and mesh shape {mesh_shape}..."
     )
     # SINGLE DEVICE RUN
-    cosmo._workspace = {}
     if absolute_painting:
         particles = uniform_particles(mesh_shape)
         # Initial displacement
@@ -57,12 +57,14 @@ def test_distrubted_pm(simulation_config, initial_conditions, cosmo, order,
                        particles,
                        a=0.1,
                        order=order)
-        ode_fn = ODETerm(make_diffrax_ode(mesh_shape))
+        ode_fn = ODETerm(make_diffrax_ode(mesh_shape, order=painting))
         y0 = jnp.stack([particles + dx, p])
     else:
         dx, p, _ = lpt(cosmo, initial_conditions, a=0.1, order=order)
-        ode_fn = ODETerm(make_diffrax_ode(mesh_shape,
-                                          paint_absolute_pos=False))
+        ode_fn = ODETerm(
+            make_diffrax_ode(mesh_shape,
+                             initial_particles='uniform',
+                             order=painting))
         y0 = jnp.stack([dx, p])
 
     solver = Dopri5()
@@ -85,10 +87,11 @@ def test_distrubted_pm(simulation_config, initial_conditions, cosmo, order,
                             saveat=saveat)
 
     if absolute_painting:
-        single_device_final_field = cic_paint(jnp.zeros(shape=mesh_shape),
-                                              solutions.ys[-1, 0])
+        single_device_final_field = paint(solutions.ys[-1, 0], order=painting)
     else:
-        single_device_final_field = cic_paint_dx(solutions.ys[-1, 0])
+        single_device_final_field = paint(solutions.ys[-1, 0],
+                                          initial_particles='uniform',
+                                          order=painting)
 
     print("Done with single device run")
     # MULTI DEVICE RUN
@@ -103,7 +106,6 @@ def test_distrubted_pm(simulation_config, initial_conditions, cosmo, order,
 
     print(f"sharded initial conditions {initial_conditions.sharding}")
 
-    cosmo._workspace = {}
     if absolute_painting:
         particles = uniform_particles(mesh_shape, sharding=sharding)
         # Initial displacement
@@ -118,7 +120,8 @@ def test_distrubted_pm(simulation_config, initial_conditions, cosmo, order,
         ode_fn = ODETerm(
             make_diffrax_ode(mesh_shape,
                              halo_size=halo_size,
-                             sharding=sharding))
+                             sharding=sharding,
+                             order=painting))
 
         y0 = jnp.stack([particles + dx, p])
     else:
@@ -130,9 +133,10 @@ def test_distrubted_pm(simulation_config, initial_conditions, cosmo, order,
                        sharding=sharding)
         ode_fn = ODETerm(
             make_diffrax_ode(mesh_shape,
-                             paint_absolute_pos=False,
+                             initial_particles='uniform',
                              halo_size=halo_size,
-                             sharding=sharding))
+                             sharding=sharding,
+                             order=painting))
         y0 = jnp.stack([dx, p])
 
     solver = Dopri5()
@@ -161,14 +165,16 @@ def test_distrubted_pm(simulation_config, initial_conditions, cosmo, order,
         , f"Final field sharding is not correct .. should be {sharding} it is instead {final_field.sharding}"
 
     if absolute_painting:
-        multi_device_final_field = cic_paint(jnp.zeros(shape=mesh_shape),
-                                             final_field,
-                                             halo_size=halo_size,
-                                             sharding=sharding)
+        multi_device_final_field = paint(final_field,
+                                         order=painting,
+                                         halo_size=halo_size,
+                                         sharding=sharding)
     else:
-        multi_device_final_field = cic_paint_dx(final_field,
-                                                halo_size=halo_size,
-                                                sharding=sharding)
+        multi_device_final_field = paint(final_field,
+                                         initial_particles='uniform',
+                                         order=painting,
+                                         halo_size=halo_size,
+                                         sharding=sharding)
 
     multi_device_final_field = process_allgather(multi_device_final_field,
                                                  tiled=True)
@@ -187,7 +193,6 @@ def test_distrubted_gradients(simulation_config, initial_conditions, cosmo,
 
     mesh_shape, box_shape = simulation_config
     # SINGLE DEVICE RUN
-    cosmo._workspace = {}
 
     mesh = jax.make_mesh(pdims, ('x', 'y'),
                          axis_types=(AxisType.Auto, AxisType.Auto))
@@ -198,7 +203,6 @@ def test_distrubted_gradients(simulation_config, initial_conditions, cosmo,
                                                       sharding)
 
     print(f"sharded initial conditions {initial_conditions.sharding}")
-    cosmo._workspace = {}
 
     @jax.jit
     def forward_model(initial_conditions, cosmo):
@@ -211,7 +215,7 @@ def test_distrubted_gradients(simulation_config, initial_conditions, cosmo,
                        sharding=sharding)
         ode_fn = ODETerm(
             make_diffrax_ode(mesh_shape,
-                             paint_absolute_pos=False,
+                             initial_particles='uniform',
                              halo_size=halo_size,
                              sharding=sharding))
         y0 = jax.tree.map(lambda dx, p: jnp.stack([dx, p]), dx, p)
@@ -234,9 +238,11 @@ def test_distrubted_gradients(simulation_config, initial_conditions, cosmo,
                                 stepsize_controller=controller,
                                 saveat=saveat)
 
-        multi_device_final_field = cic_paint_dx(solutions.ys[-1, 0],
-                                                halo_size=halo_size,
-                                                sharding=sharding)
+        multi_device_final_field = paint(solutions.ys[-1, 0],
+                                         initial_particles='uniform',
+                                         order='cic',
+                                         halo_size=halo_size,
+                                         sharding=sharding)
 
         return multi_device_final_field
 
@@ -265,7 +271,6 @@ def test_distrubted_gradients(simulation_config, initial_conditions, cosmo,
 def test_fwd_rev_gradients(cosmo, pdims):
 
     mesh_shape, box_shape = (8, 8, 8), (20.0, 20.0, 20.0)
-    cosmo._workspace = {}
 
     mesh = jax.make_mesh(pdims, ('x', 'y'),
                          axis_types=(AxisType.Auto, AxisType.Auto))
@@ -276,7 +281,6 @@ def test_fwd_rev_gradients(cosmo, pdims):
     initial_conditions = lax.with_sharding_constraint(initial_conditions,
                                                       sharding)
     print(f"sharded initial conditions {initial_conditions.sharding}")
-    cosmo._workspace = {}
 
     @partial(jax.jit, static_argnums=(2, 3, 4))
     def compute_forces(initial_conditions,
@@ -285,7 +289,7 @@ def test_fwd_rev_gradients(cosmo, pdims):
                        halo_size=0,
                        sharding=None):
 
-        paint_absolute_pos = False
+        initial_particles = 'uniform'
         particles = jnp.zeros_like(initial_conditions,
                                    shape=(*initial_conditions.shape, 3))
 
@@ -300,7 +304,7 @@ def test_fwd_rev_gradients(cosmo, pdims):
 
         initial_force = pm_forces(particles,
                                   delta=delta_k,
-                                  paint_absolute_pos=paint_absolute_pos,
+                                  initial_particles=initial_particles,
                                   halo_size=halo_size,
                                   sharding=sharding)
 
@@ -335,7 +339,6 @@ def test_fwd_rev_gradients(cosmo, pdims):
 def test_vmap(cosmo, pdims):
 
     mesh_shape, box_shape = (8, 8, 8), (20.0, 20.0, 20.0)
-    cosmo._workspace = {}
 
     mesh = jax.make_mesh(pdims, ('x', 'y'),
                          axis_types=(AxisType.Auto, AxisType.Auto))
@@ -355,7 +358,6 @@ def test_vmap(cosmo, pdims):
         [initial_conditions, initial_conditions, initial_conditions])
     print(f"unsharded initial conditions batch {single_ics.sharding}")
     print(f"sharded initial conditions batch {sharded_ics.sharding}")
-    cosmo._workspace = {}
 
     @partial(jax.jit, static_argnums=(2, 3, 4))
     def compute_forces(initial_conditions,
@@ -364,7 +366,7 @@ def test_vmap(cosmo, pdims):
                        halo_size=0,
                        sharding=None):
 
-        paint_absolute_pos = False
+        initial_particles = 'uniform'
         particles = jnp.zeros_like(initial_conditions,
                                    shape=(*initial_conditions.shape, 3))
 
@@ -379,7 +381,7 @@ def test_vmap(cosmo, pdims):
 
         initial_force = pm_forces(particles,
                                   delta=delta_k,
-                                  paint_absolute_pos=paint_absolute_pos,
+                                  initial_particles=initial_particles,
                                   halo_size=halo_size,
                                   sharding=sharding)
 

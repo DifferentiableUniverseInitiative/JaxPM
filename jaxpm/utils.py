@@ -5,13 +5,15 @@ import numpy as np
 from jax.scipy.stats import norm
 from scipy.special import legendre
 
+from jaxpm.kernels import compensation_kernel, gridding_shotnoise_kernel
+
 __all__ = [
     'power_spectrum', 'transfer', 'coherence', 'pktranscoh',
     'cross_correlation_coefficients', 'gaussian_smoothing'
 ]
 
 
-def _initialize_pk(mesh_shape, box_shape, kedges, los):
+def _initialize_pk(mesh_shape, box_shape, kedges, los, dk=None, kmax=None):
     """
     Parameters
     ----------
@@ -20,11 +22,16 @@ def _initialize_pk(mesh_shape, box_shape, kedges, los):
     box_shape : tuple of float
         Physical dimensions of the box.
     kedges : None, int, float, or list
-        If None, set dk to twice the minimum.
+        If None, build edges from ``dk``/``kmax``.
         If int, specifies number of edges.
         If float, specifies dk.
     los : array_like
         Line-of-sight vector.
+    dk : float, optional
+        Bin width. Defaults to twice the minimum wavenumber. Ignored when
+        ``kedges`` is an int or float (those specify the binning themselves).
+    kmax : float, optional
+        Maximum wavenumber. Defaults to the Nyquist frequency.
 
     Returns
     -------
@@ -37,22 +44,28 @@ def _initialize_pk(mesh_shape, box_shape, kedges, los):
     mumesh : ndarray
         Mu values for the mesh grid.
     """
-    kmax = np.pi * np.min(mesh_shape / box_shape)  # = knyquist
+    if kmax is None:
+        kmax = np.pi * np.min(mesh_shape / box_shape)  # = knyquist
 
     if isinstance(kedges, None | int | float):
         if kedges is None:
-            dk = 2 * np.pi / np.min(
-                box_shape) * 2  # twice the minimum wavenumber
-        if isinstance(kedges, int):
+            if dk is None:
+                dk = 2 * np.pi / np.min(
+                    box_shape) * 2  # twice the minimum wavenumber
+        elif isinstance(kedges, int):
             dk = kmax / (kedges + 1)  # final number of bins will be kedges-1
         elif isinstance(kedges, float):
             dk = kedges
+        if dk <= 0:
+            raise ValueError("dk must be positive and non-zero")
         kedges = np.arange(dk, kmax, dk) + dk / 2  # from dk/2 to kmax-dk/2
 
     kshapes = np.eye(len(mesh_shape), dtype=np.int32) * -2 + 1
     kvec = [(2 * np.pi * m / l) * np.fft.fftfreq(m).reshape(kshape)
             for m, l, kshape in zip(mesh_shape, box_shape, kshapes)]
-    kmesh = jnp.sqrt(sum(ki**2 for ki in kvec))
+    # NumPy (not jnp): kvec is static, so kmesh/dig/kcount/kavg/mumesh are all
+    # compile-time constants. Using jnp.sqrt here would make kmesh a tracer
+    kmesh = np.sqrt(sum(ki**2 for ki in kvec))
 
     dig = np.digitize(kmesh.reshape(-1), kedges)
     kcount = np.bincount(dig, minlength=len(kedges) + 1)
@@ -77,10 +90,32 @@ def power_spectrum(mesh,
                    mesh2=None,
                    box_shape=None,
                    kedges: int | float | list = None,
+                   dk: float = None,
+                   kmax: float = None,
                    multipoles=0,
-                   los=[0., 0., 1.]):
+                   los=[0., 0., 1.],
+                   compensate_order=None,
+                   shotnoise=None):
     """
     Compute the auto and cross spectrum of 3D fields, with multipoles.
+
+    The k-binning is set by ``kedges`` (an explicit edge array, an int number of
+    bins, or a float bin width) or, when ``kedges is None``, by the ``dk`` (bin
+    width) and ``kmax`` (maximum wavenumber) knobs, which default to twice the
+    fundamental and the Nyquist frequency respectively.
+
+    Optional grid corrections (applied per-mode on the 3D field before binning,
+    since both are anisotropic):
+
+    compensate_order : int, str, or None
+        If set, deconvolve the mass-assignment window: divide the power by
+        ``W(k)**2`` with ``W = compensation_kernel(k, compensate_order)**(-1)``
+        (i.e. multiply ``|delta_k|**2`` by ``compensation_kernel**2``).
+    shotnoise : (order, nbar) or None
+        If set, subtract the aliased shot noise ``(1 / nbar) * C_order(k)``
+        before deconvolving (auto spectrum only). ``nbar`` is the mean number
+        density in the same units as ``box_shape`` (so ``nbar = N / box.prod()``;
+        for one particle per cell this is ``mesh.prod() / box.prod()``).
     """
     # Initialize
     mesh_shape = np.array(mesh.shape)
@@ -95,8 +130,12 @@ def power_spectrum(mesh,
         los = np.asarray(los)
         los = los / np.linalg.norm(los)
     poles = np.atleast_1d(multipoles)
-    dig, kcount, kavg, mumesh = _initialize_pk(mesh_shape, box_shape, kedges,
-                                               los)
+    dig, kcount, kavg, mumesh = _initialize_pk(mesh_shape,
+                                               box_shape,
+                                               kedges,
+                                               los,
+                                               dk=dk,
+                                               kmax=kmax)
     n_bins = len(kavg) + 2
 
     # FFTs
@@ -105,6 +144,27 @@ def power_spectrum(mesh,
         mmk = meshk.real**2 + meshk.imag**2
     else:
         mmk = meshk * jnp.fft.fftn(mesh2, norm='ortho').conj()
+
+    # Optional grid corrections, applied per-mode on the 3D power before binning.
+    # Both the window and the aliased shot noise are anisotropic, so they cannot
+    # be applied to the already-binned (isotropic) P(k). The dealiasing kernel
+    # lives in jaxpm.kernels and is reused here (master equation:
+    #   P_true = (P_meas - (1/nbar) C_order) / W**2).
+    if compensate_order is not None or shotnoise is not None:
+        kshapes = np.eye(len(mesh_shape), dtype=np.int32) * -2 + 1
+        kvec_cell = [
+            2 * np.pi * np.fft.fftfreq(m).reshape(kshape)
+            for m, kshape in zip(mesh_shape, kshapes)
+        ]
+        # cell-units shot noise in the same (mmk) units as |delta_k|**2:
+        # physical shot is C/nbar, and mmk = P_phys / (box/mesh).prod().
+        scale = (box_shape / mesh_shape).prod()
+        if shotnoise is not None and mesh2 is None:
+            sn_order, nbar = shotnoise
+            mmk = mmk - gridding_shotnoise_kernel(kvec_cell,
+                                                  sn_order) / (nbar * scale)
+        if compensate_order is not None:
+            mmk = mmk * compensation_kernel(kvec_cell, compensate_order)**2
 
     # Sum powers
     pk = jnp.empty((len(poles), n_bins))
