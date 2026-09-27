@@ -29,8 +29,6 @@ def initialize_distributed():
             setup_done = True
             on_cluster = False
             os.environ["JAX_PLATFORM_NAME"] = "cpu"
-            os.environ[
-                "XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
             import jax
 
 

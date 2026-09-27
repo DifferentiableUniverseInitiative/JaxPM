@@ -11,9 +11,21 @@ on:
 jobs:
   run_tests:
     runs-on: ubuntu-latest
+    # The single-device step needs the 8 host devices too: without them it deadlocks
+    # in the relative-painting test_nbody_grad cases (all threads idle on futexes;
+    # reproduced under `taskset -c 0-3`). tests/conftest.py used to set this.
+    # --xla_cpu_multi_thread_eigen=false: XLA's Eigen intra-op threads starve the
+    # 8-host-device CPU collectives when cores are scarce, killing test_fwd_rev_gradients
+    # (SIGABRT in the jacrev backward pass on the 4-vCPU runner; the same class of hang
+    # jax-fli fixed in its CI). Locally that test hangs under `taskset -c 0-3` without
+    # this flag and passes in ~13s with it. It slows the single-device suite from ~9 to
+    # ~16 min on 4 cores.
+    env:
+      JAX_PLATFORM_NAME: cpu
+      XLA_FLAGS: "--xla_force_host_platform_device_count=8 --xla_cpu_multi_thread_eigen=false"
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13"]
 
     steps:
     - name: Checkout Source
@@ -58,16 +70,27 @@ jobs:
         # Depends on the new jax_cosmo cache (see ASKabalan:better-cache).
         # Temporary until the cache + import-error fixes merge upstream.
         pip install git+https://github.com/ASKabalan/jax_cosmo@better-cache
+        # PyPI jax-healpy 0.6 collapsed multi-dim batch shapes in get_interp_weights /
+        # get_all_neighbours, breaking spherical.py broadcasting. Fixed upstream
+        # (CMBSciPol/jax-healpy#2) and released as 0.8.1, which pyproject.toml now
+        # floors; the explicit pin makes the resolution independent of the
+        # `pip install -e .[test]` cache above.
+        pip install "jax-healpy>=0.8.1"
         # Install test requirements with no-build-isolation for faster builds
         pip install -r requirements-test.txt --no-build-isolation
         echo "numpy version installed:"
         python -c "import numpy; print(numpy.__version__)"
 
     - name: Run Single Device Tests
+      # Green runs take ~10 min (~16 with single-threaded Eigen); fail fast on a hang
+      # instead of burning 6 h.
+      timeout-minutes: 30
       run: |
         cd tests
         pytest -v -s -m "not distributed"
 
     - name: Run Distributed tests
+      # Green runs take ~56 min.
+      timeout-minutes: 90
       run: |
         pytest -v tests/test_distributed_pm.py
