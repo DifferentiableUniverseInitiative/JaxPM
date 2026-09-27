@@ -121,13 +121,15 @@ def convergence_Born(cosmo,
     density_planes : ndarray
         - Spherical: [n_planes, npix] - density on HEALPix grid
         - Flat: [n_planes, nx, ny] - density on Cartesian grid
-        Note: d_R is already included in the density normalization
     r : ndarray
         Comoving distances to plane centers [n_planes]
     a : ndarray
         Scale factors at plane centers [n_planes]
     z_source : float or ndarray
         Source redshift(s)
+    d_r : float or ndarray
+        Comoving shell thickness dχ [n_planes] (or scalar). Multiplied by
+        χ/a to form the geometric lensing weight per plane.
     dx : float, optional
         Pixel size for flat-sky case (required for flat)
     coords : ndarray, optional
