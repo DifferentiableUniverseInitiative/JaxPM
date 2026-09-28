@@ -93,7 +93,8 @@ def spherical_density_fn(mesh_shape,
             R_min=r_min,
             R_max=r_max,
             box_size=box_size,
-            mesh_shape=mesh_shape)
+            mesh_shape=mesh_shape,
+            sharding=sharding)
 
         return spherical_map
 
