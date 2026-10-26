@@ -1,0 +1,8 @@
+# Documentation build dependencies (ReadTheDocs).
+# The build renders pre-executed notebooks and never imports jaxpm, so this is a
+# standalone, lightweight set -- no jax / jaxdecomp / jaxpm here. pandoc is provided
+# by apt (see ../.readthedocs.yaml), not pip.
+sphinx>=7.0
+nbsphinx>=0.9
+sphinx-rtd-theme>=2.0
+ipython          # provides the ipython3 lexer nbsphinx uses for code-cell highlighting
