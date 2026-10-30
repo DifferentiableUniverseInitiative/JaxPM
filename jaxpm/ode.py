@@ -19,7 +19,9 @@ def symplectic_fpm_ode(
         sharding=None,
         order='CIC',
         deconvolution=False,
-        initial_particles=None):
+        initial_particles=None,
+        solver="fft",
+        mg_params=None):
 
     def drift(a, vel, args):
         """
@@ -56,6 +58,8 @@ def symplectic_fpm_ode(
             order=order,
             deconvolution=deconvolution,
             initial_particles=initial_particles,
+            solver=solver,
+            mg_params=mg_params,
         ) * 1.5 * cosmo.Omega_m)
 
         dvel = 1.0 / (ac**2 * E(cosmo, ac)) * forces
@@ -82,6 +86,8 @@ def symplectic_fpm_ode(
             order=order,
             deconvolution=deconvolution,
             initial_particles=initial_particles,
+            solver=solver,
+            mg_params=mg_params,
         ) * 1.5 * cosmo.Omega_m)
 
         dvel = 1.0 / (a**2 * E(cosmo, a)) * forces
@@ -100,7 +106,9 @@ def symplectic_ode(
         sharding=None,
         order='CIC',
         deconvolution=False,
-        initial_particles=None):
+        initial_particles=None,
+        solver="fft",
+        mg_params=None):
 
     def drift(a, vel, args):
         """
@@ -126,6 +134,8 @@ def symplectic_ode(
             order=order,
             deconvolution=deconvolution,
             initial_particles=initial_particles,
+            solver=solver,
+            mg_params=mg_params,
         ) * 1.5 * cosmo.Omega_m)
 
         # Computes the update of velocity (kick)
@@ -143,7 +153,9 @@ def make_ode_fn(
         sharding=None,
         order='CIC',
         deconvolution=False,
-        initial_particles=None):
+        initial_particles=None,
+        solver="fft",
+        mg_params=None):
 
     def nbody_ode(state, a, cosmo):
         """
@@ -159,7 +171,9 @@ def make_ode_fn(
             sharding=sharding,
             order=order,
             deconvolution=deconvolution,
-            initial_particles=initial_particles) * 1.5 * cosmo.Omega_m
+            initial_particles=initial_particles,
+            solver=solver,
+            mg_params=mg_params) * 1.5 * cosmo.Omega_m
 
         # Computes the update of position (drift)
         dpos = 1. / (a**3 * jnp.sqrt(jc.background.Esqr(cosmo, a))) * vel
@@ -179,7 +193,9 @@ def make_diffrax_ode(
         sharding=None,
         order='CIC',
         deconvolution=False,
-        initial_particles=None):
+        initial_particles=None,
+        solver="fft",
+        mg_params=None):
 
     def nbody_ode(a, state, args):
         """
@@ -196,7 +212,9 @@ def make_diffrax_ode(
             sharding=sharding,
             order=order,
             deconvolution=deconvolution,
-            initial_particles=initial_particles) * 1.5 * cosmo.Omega_m
+            initial_particles=initial_particles,
+            solver=solver,
+            mg_params=mg_params) * 1.5 * cosmo.Omega_m
 
         # Computes the update of position (drift)
         dpos = 1. / (a**3 * jnp.sqrt(jc.background.Esqr(cosmo, a))) * vel
