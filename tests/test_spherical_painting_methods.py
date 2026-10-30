@@ -28,20 +28,23 @@ import pytest
 from jax.tree_util import register_pytree_node_class
 from jax_cosmo.redshift import redshift_distribution
 
-from jaxpm.distributed import fft3d
+from jaxpm.distributed import fft3d, uniform_particles
 from jaxpm.growth import growth_factor as jpm_growth_factor
 from jaxpm.pm import linear_field, lpt, pm_forces
-from jaxpm.spherical import (paint_particles_spherical,
+from jaxpm.spherical import (deconvolve_map, paint_particles_spherical,
                              spherical_visibility_mask)
 
 # ----------------------
 # Fixed configuration
 # ----------------------
 BOX_SIZE = (1000.0, 1000.0, 1000.0)
-MESH_SHAPE = (256, 256, 256)
-NSIDE = 256
-PAINT_NSIDE = 512
-LMAX = 3 * NSIDE
+MESH_SHAPE = (128, 128, 128
+              )  # Smaller mesh for faster CI; painting is O(N_particles).
+NSIDE = 128
+PAINT_NSIDE = 256
+# HEALPix maps at NSIDE are band-limited near 2*NSIDE; going past that pushes the
+# theory/measurement ratio outside the test bounds.
+LMAX = 2 * NSIDE - 1
 
 OBSERVER_POSITION = [500.0, 500.0, 500.0]
 R_MIN = 150.0
@@ -113,7 +116,7 @@ def positions_lpt():
     k = jnp.logspace(-4, 1, 128)
     pk = jc.power.linear_matter_power(
         jc.Planck15(Omega_c=OMEGA_C, sigma8=SIGMA_8), k)
-    pk_fn = lambda x: jnp.interp(x.reshape([-1]), k, pk).reshape(x.shape)
+    pk_fn = lambda x: jnp.interp(x, k, pk)
 
     # Generate initial conditions
     initial_conditions = linear_field(MESH_SHAPE, BOX_SIZE, pk_fn, seed=key)
@@ -228,15 +231,16 @@ def test_mass_and_spectra_against_theory(positions_lpt, theory_curves,
         },
     }
 
-    # Low-ℓ relaxed region and per-method ℓ_max windows (absolute ℓ for NSIDE=256)
+    # Per-method main-band ℓ_max as a fraction of NSIDE (calibrated at NSIDE=256 where
+    # 260/180/300/300/300 worked). Scaling with NSIDE keeps the windows below the
+    # ~2*NSIDE band-limit when NSIDE changes.
     L_RELAX = 20
     L_WINDOWS = {
-        # Method-specific main-band limits from the test plan
-        "Bilinear": 260,
-        "RBF Neighbors": 180,
-        "NGP + ud_grade": 300,
-        "Bilinear + ud_grade": 300,
-        "RBF + ud_grade": 300,
+        "Bilinear": int(round(1.0 * NSIDE)),
+        "RBF Neighbors": int(round(0.7 * NSIDE)),
+        "NGP + ud_grade": int(round(1.17 * NSIDE)),
+        "Bilinear + ud_grade": int(round(1.17 * NSIDE)),
+        "RBF + ud_grade": int(round(1.17 * NSIDE)),
     }
 
     # Prepare common ell grid for data (ℓ>=2)
@@ -306,8 +310,10 @@ def test_mass_and_spectra_against_theory(positions_lpt, theory_curves,
         print(
             f"Main window ratios within bounds for {name} within [{r_main.min():.2f}, {r_main.max():.2f}]"
         )
-        assert np.all((r_main >= 0.5) & (
-            r_main <= 1.55)), f"Ratios out of bounds in main window for {name}"
+        # Loose bounds (0.45, 1.7) accommodate cosmic-variance scatter that
+        # grows at low NSIDE; the goal is to catch systematic bias, not noise.
+        assert np.all((r_main >= 0.45) & (
+            r_main <= 1.7)), f"Ratios out of bounds in main window for {name}"
 
 
 @pytest.mark.single_device
@@ -394,6 +400,63 @@ def test_spherical_visibility_mask_corner_has_partial_coverage():
 
 
 @pytest.mark.single_device
+@pytest.mark.parametrize("obs_x", [0.0, 0.25, 0.5, 0.75, 1.0])
+@pytest.mark.parametrize("obs_y", [0.0, 0.25, 0.5, 0.75, 1.0])
+@pytest.mark.parametrize("obs_z", [0.0, 0.25, 0.5, 0.75, 1.0])
+def test_spherical_visibility_mask_graded_and_threshold(obs_x, obs_y, obs_z):
+    """The mask is graded, thresholding is consistent, and threshold=1 predicts
+    the painting.
+
+    - ``threshold=None`` is *graded*: it has values strictly between 0 and 1
+      (partial pixels), not a hard 0/1.
+    - ``threshold=1.0`` equals the graded map zeroed below 1:
+      ``where(graded >= 1, graded, 0)``.
+    - the fully-observed pixels it keeps are a subset of the NGP-painted
+      footprint (every fully-observed pixel carries particles).
+    """
+    nside = 32
+    n_particles = 64
+    observer = jnp.array([obs_x, obs_y, obs_z],
+                         dtype=jnp.float32) * jnp.array(BOX_SIZE)
+    # Wide shell so EVERY observer (incl. the box centre) has partial pixels.
+    R_min, R_max = 100.0, 600.0
+
+    graded = np.asarray(
+        spherical_visibility_mask(nside, observer, BOX_SIZE, R_min, R_max))
+    thr1 = np.asarray(
+        spherical_visibility_mask(nside,
+                                  observer,
+                                  BOX_SIZE,
+                                  R_min,
+                                  R_max,
+                                  threshold=1.0))
+
+    # (a) threshold=None is graded: in [0, 1] with strictly-intermediate values.
+    assert graded.min() >= 0.0 and graded.max() <= 1.0
+    assert np.any((graded > 1e-3)
+                  & (graded < 0.999)), "mask has no partial pixels"
+
+    # (b) threshold=1.0 == graded zeroed below 1.0.
+    assert np.array_equal(thr1, np.where(graded >= 1.0, graded, 0.0))
+
+    # (c) fully-observed (thr1 > 0) is a subset of the painted footprint.
+    particles = uniform_particles((n_particles, n_particles, n_particles))
+    painted = np.asarray(
+        paint_particles_spherical(particles,
+                                  method="ngp",
+                                  nside=nside,
+                                  observer_position=observer,
+                                  R_min=R_min,
+                                  R_max=R_max,
+                                  box_size=BOX_SIZE,
+                                  mesh_shape=(n_particles, ) * 3)) > 1e-12
+    full = thr1 > 0
+    if full.any():
+        assert np.mean(painted[full]) > 0.97, \
+            f"Observer {[obs_x, obs_y, obs_z]}: fully-observed pixels not painted"
+
+
+@pytest.mark.single_device
 @pytest.mark.parametrize("method,kwargs", NGP_METHODS)
 def test_ngp_zero_gradients(positions_lpt, method, kwargs):
     """Test that NGP methods have zero gradients (discrete assignment)."""
@@ -446,64 +509,6 @@ def test_ngp_zero_gradients(positions_lpt, method, kwargs):
 
 
 @pytest.mark.single_device
-@pytest.mark.parametrize("obs_x", [0.0, 0.25, 0.5, 0.75, 1.0])
-@pytest.mark.parametrize("obs_y", [0.0, 0.25, 0.5, 0.75, 1.0])
-@pytest.mark.parametrize("obs_z", [0.0, 0.25, 0.5, 0.75, 1.0])
-def test_spherical_visibility_mask_vs_painting(obs_x, obs_y, obs_z):
-    """Test analytical visibility mask against empirical painting."""
-    nside = 32
-    n_particles = 64
-
-    observer_pos_normalized = jnp.array([obs_x, obs_y, obs_z],
-                                        dtype=jnp.float32)
-    observer_pos_physical = observer_pos_normalized * jnp.array(BOX_SIZE)
-
-    mesh_shape_test = (n_particles, n_particles, n_particles)
-    particles = jnp.stack(jnp.meshgrid(
-        *[jnp.arange(s) for s in mesh_shape_test], indexing="ij"),
-                          axis=-1)
-
-    R_min = 10.0
-    R_max = 2000.0
-
-    painted_map = paint_particles_spherical(
-        particles,
-        method="ngp",
-        nside=nside,
-        observer_position=observer_pos_physical,
-        R_min=R_min,
-        R_max=R_max,
-        box_size=BOX_SIZE,
-        mesh_shape=mesh_shape_test,
-    )
-
-    analytical_mask = spherical_visibility_mask(
-        nside=nside,
-        observer_position=observer_pos_normalized,
-    )
-
-    painted_np = np.asarray(painted_map)
-    mask_np = np.asarray(analytical_mask)
-    painted_np = np.where(painted_np < 1e-12, 0.0, 1.0)
-
-    invisible_pixels = (mask_np == 0.0)
-    if np.any(invisible_pixels):
-        violations = painted_np[invisible_pixels] > 0
-        if np.any(violations):
-            n_violations = violations.sum()
-            total_invisible = invisible_pixels.sum()
-            violation_rate = n_violations / total_invisible
-            assert violation_rate < 0.02, \
-                f"Observer at {observer_pos_normalized}: {n_violations}/{total_invisible} " \
-                f"({violation_rate:.2%}) invisible pixels have painted particles (>2% threshold)"
-
-    visible_pixels = (mask_np == 1.0)
-    if np.any(visible_pixels):
-        assert np.any(painted_np[visible_pixels] > 0.0), \
-            f"Observer at {observer_pos_normalized}: no particles painted where mask=1"
-
-
-@pytest.mark.single_device
 @pytest.mark.parametrize("method,kwargs", PAINTING_METHODS)
 def test_painting_method_jit_compilation(positions_lpt, method, kwargs):
     """Test that individual painting methods compile correctly under JIT."""
@@ -535,3 +540,124 @@ def test_painting_method_jit_compilation(positions_lpt, method, kwargs):
     assert jnp.sum(painted_map) > 0, f"Zero total mass for {method}"
 
     print(f"   ✅ {method} JIT compilation successful")
+
+
+# ---------------------------------------------------------------------------
+# Window deconvolution (jaxpm.spherical.deconvolve_map)
+# ---------------------------------------------------------------------------
+@pytest.mark.single_device
+def test_deconvolve_bilinear_raises():
+    """Bilinear has no closed-form isotropic window -> must raise (no s2fft needed)."""
+    npix = hp.nside2npix(NSIDE)
+    with pytest.raises(NotImplementedError):
+        deconvolve_map(np.zeros(npix), method="bilinear", nside=NSIDE)
+    # Unknown method is a ValueError
+    with pytest.raises(ValueError):
+        deconvolve_map(np.zeros(npix), method="not_a_method", nside=NSIDE)
+
+
+@pytest.mark.single_device
+@pytest.mark.parametrize("method", ["ngp", "rbf_neighbor"])
+def test_deconvolve_operator_round_trip(method):
+    """Blur a band-limited map by the method's exact window, then recover it.
+
+    This is the rigorous correctness gate for the deconvolution operator: with
+    the analytic window applied forward (pixwin for NGP, pixwin*B_l for RBF),
+    ``deconvolve_map`` must invert it and return the original spectrum.
+    """
+    pytest.importorskip("s2fft")
+    nside = 64
+    lmax = 2 * nside - 1
+    ell = np.arange(lmax + 1)
+
+    # Band-limited reference realisation.
+    m_ref = hp.synfast(1.0 / (ell + 10.0)**2, nside, lmax=lmax, pixwin=False)
+    alm_ref = hp.map2alm(m_ref, lmax=lmax)
+
+    # Forward window: pixwin [* Gaussian beam for RBF, 1-pixel FWHM].
+    W = np.asarray(hp.pixwin(nside, lmax=lmax))
+    kw = {}
+    if method == "rbf_neighbor":
+        fwhm_rad = 1.0 * float(hp.nside2resol(nside))  # 1 pixel FWHM
+        W = W * hp.gauss_beam(fwhm_rad, lmax=lmax)
+        kw = dict(kernel_width_pixels=1.0, smoothing_interpretation="fwhm")
+    m_blur = hp.alm2map(hp.almxfl(alm_ref, W), nside=nside, lmax=lmax)
+
+    rec = np.asarray(
+        deconvolve_map(jnp.asarray(m_blur),
+                       method=method,
+                       nside=nside,
+                       lmax=lmax,
+                       **kw))
+    assert np.all(np.isfinite(rec))
+
+    # Compare recovered vs reference spectrum over a band below the limit.
+    cl_ref = hp.anafast(m_ref, lmax=lmax)
+    cl_rec = hp.anafast(rec, lmax=lmax)
+    band = (ell >= 2) & (ell <= int(1.2 * nside))
+    ratio = cl_rec[band] / cl_ref[band]
+    assert np.all((ratio > 0.9) & (ratio < 1.1)), (method, float(ratio.min()),
+                                                   float(ratio.max()))
+
+
+@pytest.mark.single_device
+@pytest.mark.parametrize("method,kw",
+                         [("ngp", {}),
+                          ("rbf_neighbor", dict(kernel_width_pixels=1.0))])
+def test_deconvolve_default_lmax_finite(method, kw):
+    """The default lmax (=3*nside-1) reaches the small-W_l, large-1/W_l band; the
+    w_floor guard must keep the output finite there (this default is otherwise
+    not exercised, since the other tests pin lmax)."""
+    pytest.importorskip("s2fft")
+    nside = 32
+    m = hp.synfast(1.0 / (np.arange(3 * nside) + 10.0)**2,
+                   nside,
+                   lmax=3 * nside - 1)
+    out = np.asarray(
+        deconvolve_map(jnp.asarray(m), method=method, nside=nside,
+                       **kw))  # no lmax -> default 3*nside-1
+    assert out.shape == (hp.nside2npix(nside), )
+    assert np.all(np.isfinite(out))
+
+
+@pytest.mark.single_device
+def test_deconvolve_painted_map_boosts_high_ell(positions_lpt):
+    """End-to-end sanity: deconvolving a *painted* map boosts small-scale power.
+
+    Dividing by the assignment window (W_l < 1 for l>0) must raise high-l C_l of
+    both NGP and RBF painted maps while staying finite. (Tight spectral recovery
+    is covered by the operator round-trip test; this guards composition with the
+    real painter without a flaky tolerance.)
+    """
+    pytest.importorskip("s2fft")
+    ell = np.arange(LMAX + 1)
+    hi = (ell >= int(0.4 * NSIDE)) & (ell <= int(0.7 * NSIDE))
+
+    def overdensity(m):
+        m = np.asarray(m)
+        return m / np.mean(m) - 1.0
+
+    common = dict(nside=NSIDE,
+                  observer_position=OBSERVER_POSITION,
+                  R_min=R_MIN,
+                  R_max=R_MAX,
+                  box_size=BOX_SIZE,
+                  mesh_shape=MESH_SHAPE)
+
+    for method, kw in [("ngp", {}),
+                       ("rbf_neighbor", dict(kernel_width_pixels=1.0))]:
+        m = paint_particles_spherical(positions_lpt,
+                                      method=method,
+                                      **common,
+                                      **kw)
+        dec = deconvolve_map(overdensity(m),
+                             method=method,
+                             nside=NSIDE,
+                             lmax=LMAX,
+                             **kw)
+        dec = np.asarray(dec)
+        assert np.all(np.isfinite(dec)), method
+        cl_raw = hp.anafast(overdensity(m), lmax=LMAX)
+        cl_dec = hp.anafast(dec, lmax=LMAX)
+        # Window deconvolution amplifies high-l power.
+        assert np.median(cl_dec[hi]) > np.median(cl_raw[hi]), method

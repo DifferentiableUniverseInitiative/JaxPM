@@ -6,8 +6,9 @@ from helpers import MSE
 from jax import numpy as jnp
 
 from jaxpm.distributed import uniform_particles
+from jaxpm.ode import make_diffrax_ode
 from jaxpm.painting import cic_paint, cic_paint_dx
-from jaxpm.pm import lpt, make_diffrax_ode
+from jaxpm.pm import lpt
 
 
 @pytest.mark.single_device
@@ -19,7 +20,6 @@ def test_nbody_grad(simulation_config, initial_conditions, lpt_scale_factor,
                     absolute_painting, adjoint):
 
     mesh_shape, _ = simulation_config
-    cosmo._workspace = {}
 
     if adjoint == 'OTD':
         pytest.skip("OTD adjoint not implemented yet (needs PFFT3D JVP)")
@@ -48,7 +48,7 @@ def test_nbody_grad(simulation_config, initial_conditions, lpt_scale_factor,
                            a=lpt_scale_factor,
                            order=order)
             ode_fn = ODETerm(
-                make_diffrax_ode(mesh_shape, paint_absolute_pos=False))
+                make_diffrax_ode(mesh_shape, initial_particles='uniform'))
             y0 = jnp.stack([dx, p])
 
         solver = Dopri5()

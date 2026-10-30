@@ -1,0 +1,8 @@
+# GitHub language statistics (Linguist)
+# JaxPM is a Python library. The Jupyter notebooks and the whole docs/ tree are
+# teaching material / documentation, not part of the package, so they are marked
+# as documentation and excluded from the repository's language breakdown (otherwise
+# "Jupyter Notebook" dominates the bar). They stay fully visible in diffs and on the
+# rendered docs site.
+*.ipynb   linguist-documentation=true
+docs/**   linguist-documentation=true

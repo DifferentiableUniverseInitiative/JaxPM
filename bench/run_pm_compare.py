@@ -222,11 +222,11 @@ def main():
         out = pm_forces(
             dx,
             mesh_shape=mesh_shape,
-            paint_absolute_pos=False,
+            initial_particles="uniform",
             halo_size=args.halo_size,
             sharding=sharding,
             solver=("mg" if solver != "fft" else "fft"),
-            fd=args.
+            laplace_fd=args.
             fft_fd,  # discrete operator on both sides => pure solver comparison
             mg_params=dict(cycles=cycles, **mg_kw)
             if solver != "fft" else None,

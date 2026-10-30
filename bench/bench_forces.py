@@ -277,14 +277,14 @@ def main():
     mg_params_warm = {**mg_params, "cycles": args.warm_cycles}
 
     common = dict(mesh_shape=mesh_shape,
-                  paint_absolute_pos=False,
+                  initial_particles='uniform',
                   order=args.order,
                   halo_size=halo_size,
                   sharding=sharding)
 
     @jax.jit
     def f_fft(field):
-        return pm_forces(field, solver="fft", fd=args.fd, **common)
+        return pm_forces(field, solver="fft", laplace_fd=args.fd, **common)
 
     @jax.jit
     def f_mg(field, u0):

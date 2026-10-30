@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.lax import FftType
 from jax.sharding import PartitionSpec as P
-from jaxdecomp import fftfreq3d, get_output_specs
+from jaxdecomp import fftfreq3d, get_fft_output_sharding
 
 from jaxpm.distributed import autoshmap
 
@@ -50,12 +50,12 @@ def fftk(k_array):
 
 def interpolate_power_spectrum(input, k, pk, sharding=None):
 
-    pk_fn = lambda x: jnp.interp(x.reshape(-1), k, pk).reshape(x.shape)
+    pk_fn = lambda x: jnp.interp(x, k, pk)
 
     gpu_mesh = sharding.mesh if sharding is not None else None
     specs = sharding.spec if sharding is not None else P()
-    out_specs = P(*get_output_specs(
-        FftType.FFT, specs, mesh=gpu_mesh)) if gpu_mesh is not None else P()
+    out_specs = get_fft_output_sharding(
+        sharding).spec if sharding is not None else P()
 
     return autoshmap(pk_fn,
                      gpu_mesh=gpu_mesh,
@@ -81,7 +81,7 @@ def gradient_kernel(kvec, direction, order=1):
     if order == 0:
         wts = 1j * kvec[direction]
         wts = jnp.squeeze(wts)
-        wts[len(wts) // 2] = 0
+        wts = wts.at[len(wts) // 2].set(0)
         wts = wts.reshape(kvec[direction].shape)
         return wts
     else:
@@ -251,9 +251,9 @@ def PGD_kernel(kvec, kl, ks):
     kk = sum(ki**2 for ki in kvec)
     kl2 = kl**2
     ks4 = ks**4
-    mask = (kk == 0).nonzero()
-    kk[mask] = 1
-    v = jnp.exp(-kl2 / kk) * jnp.exp(-kk**2 / ks4)
+    kk_nozero = jnp.where(kk == 0, 1,
+                          kk)  # avoid 0-division at k=0 (masked below)
+    v = jnp.exp(-kl2 / kk_nozero) * jnp.exp(-kk_nozero**2 / ks4)
     imask = (~(kk == 0)).astype(int)
     v *= imask
     return v
