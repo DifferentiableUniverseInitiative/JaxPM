@@ -169,18 +169,17 @@ def make_ode_fn(
         """
         pos, vel = state
 
-        forces = pm_forces(
-            pos,
-            mesh_shape=mesh_shape,
-            paint_absolute_pos=paint_absolute_pos,
-            halo_size=halo_size,
-            sharding=sharding,
-            order=order,
-            deconvolution=deconvolution,
-            initial_particles=initial_particles,
-            solver=solver,
-            mg_params=mg_params,
-            laplace_fd=laplace_fd) * 1.5 * cosmo.Omega_m
+        forces = pm_forces(pos,
+                           mesh_shape=mesh_shape,
+                           paint_absolute_pos=paint_absolute_pos,
+                           halo_size=halo_size,
+                           sharding=sharding,
+                           order=order,
+                           deconvolution=deconvolution,
+                           initial_particles=initial_particles,
+                           solver=solver,
+                           mg_params=mg_params,
+                           laplace_fd=laplace_fd) * 1.5 * cosmo.Omega_m
 
         # Computes the update of position (drift)
         dpos = 1. / (a**3 * jnp.sqrt(jc.background.Esqr(cosmo, a))) * vel
@@ -212,18 +211,17 @@ def make_diffrax_ode(
         pos, vel = state
         cosmo = args
 
-        forces = pm_forces(
-            pos,
-            mesh_shape=mesh_shape,
-            paint_absolute_pos=paint_absolute_pos,
-            halo_size=halo_size,
-            sharding=sharding,
-            order=order,
-            deconvolution=deconvolution,
-            initial_particles=initial_particles,
-            solver=solver,
-            mg_params=mg_params,
-            laplace_fd=laplace_fd) * 1.5 * cosmo.Omega_m
+        forces = pm_forces(pos,
+                           mesh_shape=mesh_shape,
+                           paint_absolute_pos=paint_absolute_pos,
+                           halo_size=halo_size,
+                           sharding=sharding,
+                           order=order,
+                           deconvolution=deconvolution,
+                           initial_particles=initial_particles,
+                           solver=solver,
+                           mg_params=mg_params,
+                           laplace_fd=laplace_fd) * 1.5 * cosmo.Omega_m
 
         # Computes the update of position (drift)
         dpos = 1. / (a**3 * jnp.sqrt(jc.background.Esqr(cosmo, a))) * vel
