@@ -17,24 +17,27 @@ via the badge at the top of the notebook.
 3. **[Painting & deconvolution](02b-Painting_and_Deconvolution.ipynb)** — mass-assignment
    windows (NGP/CIC/TSC/PCS), 3D power spectra via `jaxpm.utils.power_spectrum`, and
    window deconvolution / compensation.
+4. **[Multigrid Poisson solver](09-Multigrid_Poisson_Solver.ipynb)** — `pm_forces(solver="mg")`
+   compared with the FFT solver: force accuracy against V-cycles, warm-starting from the
+   previous potential inside a PM simulation, and timings.
 
 ### Multi-GPU / multi-host
-4. **[Multi-GPU PM with halo exchange](03-MultiGPU_PM_Halo.ipynb)** — sharding, device
+5. **[Multi-GPU PM with halo exchange](03-MultiGPU_PM_Halo.ipynb)** — sharding, device
    mesh, and halo size.
-5. **[Multi-GPU PM solvers](04-MultiGPU_PM_Solvers.ipynb)** — comparing ODE solvers in a
+6. **[Multi-GPU PM solvers](04-MultiGPU_PM_Solvers.ipynb)** — comparing ODE solvers in a
    distributed setup.
-6. **[Multi-host PM](05-MultiHost_PM.ipynb)** — multi-node runs (job submission, device
+7. **[Multi-host PM](05-MultiHost_PM.ipynb)** — multi-node runs (job submission, device
    init, gathering results).
-7. **[Animating PM fields](06-Animating_PM_Fields.ipynb)** — rendering an animation from
+8. **[Animating PM fields](06-Animating_PM_Fields.ipynb)** — rendering an animation from
    saved fields.
 
 > **Note:** notebooks 03–06 still demonstrate the older `cic_paint` / `make_diffrax_ode`
 > API and are scheduled for migration to `paint` / `symplectic_ode`.
 
 ### Spherical painting & lensing
-8. **[Spherical painting methods](07-Spherical_Painting_Methods.ipynb)** — HEALPix
+9. **[Spherical painting methods](07-Spherical_Painting_Methods.ipynb)** — HEALPix
    painting (NGP / RBF), and window deconvolution with `jaxpm.spherical.deconvolve_map`.
-9. **[Convergence vs GLASS](08-convergence-vs-glass.ipynb)** — Born weak-lensing
+10. **[Convergence vs GLASS](08-convergence-vs-glass.ipynb)** — Born weak-lensing
    convergence from a lightcone, validated against GLASS.
 
 ## Painting API (current)
