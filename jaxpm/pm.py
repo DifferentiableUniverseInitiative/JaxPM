@@ -66,7 +66,11 @@ def pm_forces(positions,
               deconvolution=False,
               initial_particles=None,
               gradient_order=1,
-              laplace_fd=False):
+              laplace_fd=False,
+              solver="fft",
+              mg_params=None,
+              u0=None,
+              return_potential=False):
     """
     Computes gravitational forces on particles using a PM scheme.
 
@@ -87,6 +91,22 @@ def pm_forces(positions,
         (0 = exact ``ik``, 1 = 4th-order finite-difference).
     laplace_fd : bool
         Use the finite-difference inverse-Laplace kernel for the Poisson solve.
+    solver : {'fft', 'mg'}
+        ``'fft'`` (default) solves the Poisson equation with the jaxdecomp FFT.
+        ``'mg'`` uses the real-space halo multigrid solver of
+        ``jaxpm.mg_forces`` followed by a 4th-order finite-difference gradient.
+        The multigrid solver always uses the discrete Laplacian (it matches
+        ``laplace_fd=True``, so ``laplace_fd`` is ignored) and does not support
+        ``deconvolution=True`` or ``gradient_order != 1``.
+    mg_params : dict, optional
+        Multigrid settings for ``solver='mg'`` (``cycles``, ``v1``, ``v2``,
+        ``omega``, ``levels``, ``agg_n``).
+    u0 : array, optional
+        Warm-start potential for ``solver='mg'``, e.g. the previous step's
+        potential rescaled by the growth factor. Ignored by the FFT solver.
+    return_potential : bool
+        If True, return ``(forces, phi)`` where ``phi`` is the real-space
+        potential (``None`` for ``solver='fft'``), to reuse as the next ``u0``.
     paint_absolute_pos : bool, optional
         Deprecated -- use ``initial_particles`` instead (``True`` -> ``None``,
         ``False`` -> ``'uniform'``).
@@ -119,6 +139,39 @@ def pm_forces(positions,
                                              halo_size=halo_size,
                                              sharding=sharding)
 
+    if solver == "mg":
+        # Real-space multigrid Poisson + finite-difference gradient (warm-startable; no FFT).
+        from jaxpm.mg_forces import mg_force_field
+        if deconvolution:
+            raise NotImplementedError(
+                "solver='mg' does not support deconvolution=True")
+        if gradient_order != 1:
+            raise NotImplementedError(
+                "solver='mg' only supports gradient_order=1 "
+                "(4th-order finite difference)")
+        if delta is None:
+            field = paint_fn(positions)
+        elif jnp.isrealobj(delta):
+            field = delta
+        else:
+            raise ValueError(
+                "solver='mg' needs a real-space density (got delta_k); "
+                "pass delta=<real field> or positions.")
+        mesh = sharding.mesh if sharding is not None else None
+        force_mesh, phi = mg_force_field(field,
+                                         mesh=mesh,
+                                         u0=u0,
+                                         **(mg_params or {}))
+        # The multigrid solve runs in float32; cast back so readout matches
+        # the dtype of the density (float64 when jax_enable_x64 is on).
+        force_mesh = force_mesh.astype(field.dtype)
+        forces = jnp.stack(
+            [read_fn(force_mesh[..., i], positions) for i in range(3)],
+            axis=-1)
+        return (forces, phi) if return_potential else forces
+    elif solver != "fft":
+        raise ValueError(f"Unknown solver {solver!r}; expected 'fft' or 'mg'")
+
     if delta is None:
         field = paint_fn(positions)
         delta_k = fft3d(field)
@@ -140,7 +193,7 @@ def pm_forces(positions,
         read_fn(ifft3d(-gradient_kernel(kvec, i, order=gradient_order) * pot_k),positions
         ) for i in range(3)], axis=-1) # yapf: disable
 
-    return forces
+    return (forces, None) if return_potential else forces
 
 
 def lpt(cosmo,
