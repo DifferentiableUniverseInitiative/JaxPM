@@ -14,7 +14,7 @@ urls = { "Homepage" = "https://github.com/DifferentiableUniverseInitiative/JaxPM
 dependencies = [
   "jax_cosmo",
   "jax>=0.11.2",
-  "jaxdecomp>=0.3.5",
+  "jaxdecomp>=0.3.4",
   "jax-healpy>=0.8.1"
 ]
 
@@ -22,9 +22,6 @@ dependencies = [
 test = [
   "pytest",
   "diffrax"
-]
-bench = [
-  "jax-hpc-profiler"
 ]
 # Spherical (HEALPix) painting + window deconvolution. jax_healpy[recommended]
 # pulls s2fft (the harmonic-transform engine behind map2alm/alm2map); healpy is
@@ -39,10 +36,3 @@ packages = ["jaxpm"]
 
 [tool.setuptools_scm]
 version_file = "jaxpm/_version.py"
-
-
-[tool.uv]
-default-groups = []
-
-[tool.uv.sources]
-jax-cosmo = {branch = "better-cache", git = "https://github.com/ASKabalan/jax_cosmo"}
