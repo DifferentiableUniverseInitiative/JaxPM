@@ -14,7 +14,7 @@ urls = { "Homepage" = "https://github.com/DifferentiableUniverseInitiative/JaxPM
 dependencies = [
   "jax_cosmo",
   "jax>=0.11.2",
-  "jaxdecomp>=0.3.4",
+  "jaxdecomp>=0.3.5",
   "jax-healpy>=0.8.1"
 ]
 
